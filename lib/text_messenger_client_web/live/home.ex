@@ -68,6 +68,8 @@ defmodule TextMessengerClientWeb.HomePage do
       {1, "Czat 1", "Ostatnia wiadomość"},
       {2, "Czat 2", "Jakaś inna ostatnia wiadomość"}
     ]
+
+    contacts
   end
 
   defp load_messages(chat_id) do

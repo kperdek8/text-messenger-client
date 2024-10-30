@@ -55,7 +55,9 @@ defmodule TextMessengerClient.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:protobuf, "~> 0.13.0"},
+      {:httpoison, "~> 2.2.1"}
     ]
   end
 
@@ -74,7 +76,14 @@ defmodule TextMessengerClient.MixProject do
         "tailwind text_messenger_client --minify",
         "esbuild text_messenger_client --minify",
         "phx.digest"
-      ]
+      ],
+      "protobuf.generate": &generate_protobuf/1
     ]
+  end
+
+  def generate_protobuf(_) do
+    Mix.shell().cmd(
+      "protoc --proto_path=priv/protos --elixir_out=./lib/protos ./priv/protos/*.proto"
+    )
   end
 end
