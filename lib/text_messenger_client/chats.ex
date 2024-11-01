@@ -1,4 +1,4 @@
-defmodule TextMessengerClient.Chats do
+defmodule TextMessengerClient.ChatsAPI do
   alias HTTPoison
   import TextMessengerClient.RequestHandler
 

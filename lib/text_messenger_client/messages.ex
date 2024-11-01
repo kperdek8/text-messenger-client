@@ -1,4 +1,4 @@
-defmodule TextMessengerClient.Messages do
+defmodule TextMessengerClient.MessagesAPI do
   alias HTTPoison
   import TextMessengerClient.RequestHandler
 
