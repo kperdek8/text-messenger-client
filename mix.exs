@@ -57,7 +57,8 @@ defmodule TextMessengerClient.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       {:protobuf, "~> 0.13.0"},
-      {:httpoison, "~> 2.2.1"}
+      {:httpoison, "~> 2.2.1"},
+      {:phoenix_client, "~> 0.3"}
     ]
   end
 
