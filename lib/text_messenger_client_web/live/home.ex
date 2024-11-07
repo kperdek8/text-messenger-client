@@ -1,16 +1,15 @@
 defmodule TextMessengerClientWeb.HomePage do
   use TextMessengerClientWeb, :live_view
-  import TextMessengerClient.ChatsAPI
-  import TextMessengerClient.MessagesAPI
-  import TextMessengerClient.UsersAPI
+  import TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI}
+  alias TextMessengerClient.Protobuf.{ChatMessage, User, Chat}
 
   def mount(_params, _session, socket) do
     contacts = fetch_chats().chats
-    messages = fetch_messages(1).messages
+    messages = fetch_messages("11111111-1111-1111-1111-111111111111").messages
     users = fetch_users().users
 
-    chat_id = 1
-    user_id = 1
+    chat_id = "11111111-1111-1111-1111-111111111111"
+    user_id = "453dab88-c5be-43fa-b31a-3ea296c2fa8e"
     last_message_id = List.last(messages).id
 
     {:ok, websocket} = TextMessengerClient.SocketClient.start(user_id, chat_id, self())
@@ -19,7 +18,6 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_event("send_message", %{"message" => message}, socket) do
-    id = socket.assigns.last_message_id + 1
     TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, message)
 
     #socket = assign(socket, messages: [%ChatMessage{id: id, content: message, user_id: 1} | socket.assigns.messages], last_message_id: id)
@@ -27,16 +25,14 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_event("select_chat", %{"id" => id}, socket) do
-    chat_id = String.to_integer(id)
+    {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, id)
 
-    {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, chat_id)
-
-    socket = assign(socket, websocket: new_websocket, selected_chat: chat_id, messages: fetch_messages(chat_id).messages)
+    socket = assign(socket, websocket: new_websocket, selected_chat: id, messages: fetch_messages(id).messages)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: payload}, socket) do
-    id = socket.assigns.last_message_id + 1
+    id = generate_uuid()
     IO.inspect(payload, label: "New message")
     socket = assign(socket, messages: [%ChatMessage{id: id, content: payload["content"], user_id: payload["user_id"]} | socket.assigns.messages], last_message_id: id)
     {:noreply, socket}
@@ -95,5 +91,22 @@ defmodule TextMessengerClientWeb.HomePage do
   def terminate(_reason, socket) do
     TextMessengerClient.SocketClient.stop(socket.assigns.websocket)
     :ok
+  end
+
+  # TODO: Remove after testing
+
+  def generate_uuid() do
+    :crypto.strong_rand_bytes(16)
+    |> set_version_and_variant()
+    |> format_as_uuid()
+  end
+
+  defp set_version_and_variant(bytes) do
+    <<a::size(6), b::size(2), c::size(8), d::size(8), rest::binary>> = bytes
+    <<a::size(6), 0x40::size(2), c::size(8), 0x80::size(8), rest::binary>>
+  end
+
+  defp format_as_uuid(<<a::size(32), b::size(16), c::size(16), d::size(16), e::size(48)>>) do
+    "#{Integer.to_string(a, 16)}-#{Integer.to_string(b, 16)}-#{Integer.to_string(c, 16)}-#{Integer.to_string(d, 16)}-#{Integer.to_string(e, 16)}"
   end
 end

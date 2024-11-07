@@ -1,6 +1,7 @@
 defmodule TextMessengerClient.UsersAPI do
   alias HTTPoison
   import TextMessengerClient.RequestHandler
+  alias TextMessengerClient.Protobuf.{Users, User}
 
   def fetch_users() do
     api_url = Application.get_env(:text_messenger_client, :api_url)

@@ -1,9 +1,9 @@
-//TODO: Split into multiple protos
-
 syntax = "proto3";
 
+package TextMessengerClient.Protobuf;
+
 message User {
-  int32 id = 1;
+  string id = 1; // UUID stored as string
   string name = 2;
 }
 
@@ -12,7 +12,7 @@ message Users {
 }
 
 message Chat {
-    int32 id = 1;
+    string id = 1; // UUID stored as string
     repeated User users = 2;
     string name = 3;
 }
@@ -22,9 +22,9 @@ message Chats {
 }
 
 message ChatMessage {
-  int32 id = 1;
-  int32 user_id = 2;
-  int32 chat_id = 3;
+  string id = 1; // UUID stored as string
+  string user_id = 2;
+  string chat_id = 3;
   string content = 4;
   string timestamp = 5;
 }
