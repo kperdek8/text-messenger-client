@@ -20,6 +20,7 @@ defmodule TextMessengerClientWeb.Router do
 
     live_session :default, layout: false do
       live("/", HomePage)
+      live("/login", LoginPage)
     end
   end
 

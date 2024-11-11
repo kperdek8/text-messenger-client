@@ -15,7 +15,7 @@ defmodule TextMessengerClient.SocketClient do
 
     wait_for_connection(socket)
 
-    case join_chat_room(socket, chat_id) do
+    case join_chat(socket, chat_id) do
       {:ok, channel} ->
         {:ok, %WebSocket{socket: socket, channel: channel, user_id: user_id, chat_id: chat_id, liveview_pid: liveview_pid}}
       {:error, reason} ->
@@ -49,7 +49,7 @@ defmodule TextMessengerClient.SocketClient do
   def change_chat(%WebSocket{socket: socket} = websocket, new_chat_id) do
     PhoenixClient.Channel.leave(websocket.channel)
 
-    case join_chat_room(socket, new_chat_id) do
+    case join_chat(socket, new_chat_id) do
       {:ok, new_channel} ->
         {:ok, %WebSocket{websocket | channel: new_channel, chat_id: new_chat_id}}
       {:error, reason} ->
@@ -62,8 +62,8 @@ defmodule TextMessengerClient.SocketClient do
     send(liveview_pid, {:socket_event, event, payload})
   end
 
-  defp join_chat_room(socket, chat_id) do
-    topic = "room:#{chat_id}"
+  defp join_chat(socket, chat_id) do
+    topic = "chat:#{chat_id}"
 
     case PhoenixClient.Channel.join(socket, topic) do
       {:ok, _, channel} ->

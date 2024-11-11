@@ -1,4 +1,4 @@
-defmodule TextMessengerClientWeb.ContactComponent do
+defmodule TextMessengerClientWeb.ChatPreviewComponent do
   use Phoenix.LiveComponent
 
   def render(assigns) do
