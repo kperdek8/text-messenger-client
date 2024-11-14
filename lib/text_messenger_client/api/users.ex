@@ -19,7 +19,7 @@ defmodule TextMessengerClient.UsersAPI do
     api_url = Application.get_env(:text_messenger_client, :api_url)
     params = URI.encode_query(%{username: username, password: password})
     endpoint_url = "#{api_url}/users/register/?#{params}"
-    with {:ok, 201, %{"message" => message, "username" => username}} <- post_request(endpoint_url, "") do
+    with {:ok, 201, %{"message" => message, "username" => _username}} <- post_request(endpoint_url, "") do
       {:ok, message}
     else
       {:ok, 422, %{"details" => details}} -> {:error, details}

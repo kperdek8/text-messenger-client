@@ -8,7 +8,7 @@ defmodule TextMessengerClientWeb.LoginPage do
       socket
       |> assign(:is_registering, false)
       |> assign(:message, "")
-    {:ok, socket}
+    {:ok, socket} 
   end
 
   def render(assigns) do
@@ -82,9 +82,11 @@ defmodule TextMessengerClientWeb.LoginPage do
 
   def handle_event("login", %{"username" => username, "password" => password}, socket) do
     with {:ok, {token, _username, _user_id}} <- login(username, password) do
-      {:noreply,
-      socket
-      |> redirect(to: "/")}
+      socket =
+        socket
+        |> assign(token: token)
+        |> redirect(to: "/")
+      {:noreply, socket}
     else
       {:error, %{"error" => error}} -> {:noreply, assign(socket, message: error)}
     end

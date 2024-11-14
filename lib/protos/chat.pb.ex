@@ -52,3 +52,12 @@ defmodule TextMessengerClient.Protobuf.ChatMessages do
 
   field :messages, 1, repeated: true, type: TextMessengerClient.Protobuf.ChatMessage
 end
+
+defmodule TextMessengerClient.Protobuf.GroupKey do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
+
+  field :key, 1, type: :bytes
+  field :signature, 2, type: :bytes
+end

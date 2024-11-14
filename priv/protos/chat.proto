@@ -32,3 +32,8 @@ message ChatMessage {
 message ChatMessages {
   repeated ChatMessage messages = 1;
 }
+
+message GroupKey {
+  bytes key = 1;
+  bytes signature = 2;
+}
