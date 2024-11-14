@@ -27,7 +27,7 @@ defmodule TextMessengerClientWeb.LoginPage do
         </div>
 
         <!-- Login/Registration Form -->
-        <form phx-submit={if @is_registering, do: "register", else: "login"} class="flex flex-col gap-4 mt-4">
+        <form id="login-form" phx-submit={if @is_registering, do: "register", else: "login"} class="flex flex-col gap-4 mt-4" phx-hook="SubmitLoginForm">
 
           <!-- Username Field -->
           <input
@@ -65,6 +65,12 @@ defmodule TextMessengerClientWeb.LoginPage do
           </button>
         </form>
 
+        <!-- Hidden Form for POST Request (will be submitted by JS hook) -->
+        <form id="hidden-login-form" action="/login" method="POST" style="display: none;">
+          <input type="hidden" id="token-input" name="token" />
+          <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        </form>
+
         <!-- Toggle between Login and Registration -->
         <div class="text-center mt-4">
           <a href="#" phx-click="toggle-auth" class="text-blue-400 hover:underline">
@@ -82,11 +88,9 @@ defmodule TextMessengerClientWeb.LoginPage do
 
   def handle_event("login", %{"username" => username, "password" => password}, socket) do
     with {:ok, {token, _username, _user_id}} <- login(username, password) do
-      socket =
-        socket
-        |> assign(token: token)
-        |> redirect(to: "/session?token=#{token}")
-      {:noreply, socket}
+      # Trigger the JavaScript hook event with the token
+      {:noreply, push_event(socket, "trigger_login_post", %{token: token})}
+      #{:noreply, socket}
     else
       {:error, %{"error" => error}} -> {:noreply, assign(socket, message: error)}
     end

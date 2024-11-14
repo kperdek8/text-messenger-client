@@ -17,7 +17,8 @@ defmodule TextMessengerClientWeb.Router do
 
   scope "/", TextMessengerClientWeb do
     pipe_through(:browser)
-    get("/session", UserSessionController, :login)
+    post("/login", UserSessionController, :login)
+    post("/logout", UserSessionController, :logout)
 
     live_session :default, layout: false do
       live("/", HomePage)
