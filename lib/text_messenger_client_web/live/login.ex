@@ -8,7 +8,7 @@ defmodule TextMessengerClientWeb.LoginPage do
       socket
       |> assign(:is_registering, false)
       |> assign(:message, "")
-    {:ok, socket} 
+    {:ok, socket}
   end
 
   def render(assigns) do
@@ -85,7 +85,7 @@ defmodule TextMessengerClientWeb.LoginPage do
       socket =
         socket
         |> assign(token: token)
-        |> redirect(to: "/")
+        |> redirect(to: "/session?token=#{token}")
       {:noreply, socket}
     else
       {:error, %{"error" => error}} -> {:noreply, assign(socket, message: error)}
