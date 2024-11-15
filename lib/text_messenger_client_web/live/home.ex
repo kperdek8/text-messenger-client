@@ -19,7 +19,7 @@ defmodule TextMessengerClientWeb.HomePage do
 
       {:ok, websocket} = TextMessengerClient.SocketClient.start(user_id, chat_id, self())
 
-      {:ok, assign(socket, websocket: websocket, messages: messages, chats: chats, selected_chat: chat_id, users: users, token: token, show_create_chat_form: false, show_add_user_form: false)}
+      {:ok, assign(socket, websocket: websocket, messages: messages, chats: chats, selected_chat: chat_id, users: users, token: token, show_create_chat_modal: false, show_add_user_modal: false, form_error: nil)}
     end
   end
 
@@ -35,22 +35,34 @@ defmodule TextMessengerClientWeb.HomePage do
     {:noreply, socket}
   end
 
-  def handle_event("toggle_create_chat_form", _params, socket) do
-    {:noreply, assign(socket, show_create_chat_form: !socket.assigns.show_create_chat_form)}
+  def handle_event("toggle_create_chat_modal", _params, socket) do
+    socket = assign(socket, show_create_chat_modal: !socket.assigns.show_create_chat_modal)
+    {:noreply, socket}
   end
 
-  def handle_event("toggle_add_user_form", _params, socket) do
-    {:noreply, assign(socket, show_add_user_form: !socket.assigns.show_add_user_form)}
+  def handle_event("toggle_add_user_modal", _params, socket) do
+    socket = assign(socket, show_add_user_modal: !socket.assigns.show_add_user_modal)
+    {:noreply, socket}
   end
 
   def handle_event("create_chat", %{"chat_name" => chat_name}, socket) do
-    IO.inspect("Creating chat with name: #{chat_name}")
-    {:noreply, socket}
+    if String.trim(chat_name) == "" do
+      {:noreply, assign(socket, form_error: "Chat name cannot be empty")}
+    else
+      # Placeholder for actual chat creation logic
+      IO.inspect("Creating chat with name: #{chat_name}")
+      {:noreply, assign(socket, show_create_chat_modal: false, form_error: nil)}
+    end
   end
 
   def handle_event("add_user", %{"user_uuid" => user_uuid}, socket) do
-    IO.inspect("Adding user with UUID: #{user_uuid}")
-    {:noreply, socket}
+    if String.trim(user_uuid) == "" do
+      {:noreply, assign(socket, form_error: "User UUID cannot be empty")}
+    else
+      # Placeholder for actual user addition logic
+      IO.inspect("Adding user with UUID: #{user_uuid}")
+      {:noreply, assign(socket, show_add_user_modal: false, form_error: nil)}
+    end
   end
 
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: payload}, socket) do
@@ -85,25 +97,9 @@ defmodule TextMessengerClientWeb.HomePage do
             <.live_component module={TextMessengerClientWeb.ChatPreviewComponent} id={id} message={"TODO: Zaimplementuj podgląd ostatniej wiadomość"} name={name} selected_chat={@selected_chat} />
           <% end %>
           <!-- Create New Chat Button (Below Chat List) -->
-          <button class="mt-4 p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg w-full" phx-click="toggle_create_chat_form">
+          <button class="mt-4 p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg w-full" phx-click="toggle_create_chat_modal">
             <p>Create New Chat</p>
           </button>
-
-          <!-- Create New Chat Form -->
-          <%= if @show_create_chat_form do %>
-            <form phx-submit="create_chat" class="flex flex-col gap-4 mt-4">
-              <input
-                name="chat_name"
-                type="text"
-                placeholder="Enter chat name"
-                class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none text-gray-200"
-                required
-              />
-              <button type="submit" class="mt-2 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg w-full">
-                Create Chat
-              </button>
-            </form>
-          <% end %>
         </div>
         <!-- Current user + Logout -->
         <div id="logout-container" class="flex justify-between w-full text-white">
@@ -147,27 +143,68 @@ defmodule TextMessengerClientWeb.HomePage do
             <.live_component module={TextMessengerClientWeb.UserPreviewComponent} id={id} username={name} />
           <% end %>
           <!-- Add User to Chat Button (Below User List) -->
-          <button class="mt-4 p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg w-full" phx-click="toggle_add_user_form">
+          <button class="mt-4 p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg w-full" phx-click="toggle_add_user_modal">
             Add User to Chat
           </button>
+        </div>
+      </div>
 
-          <!-- Add User to Chat Form -->
-          <%= if @show_add_user_form do %>
-            <form phx-submit="add_user" class="flex flex-col gap-4 mt-4">
+      <!-- Modals -->
+      <%= if @show_create_chat_modal do %>
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+          <div class="bg-gray-800 text-gray-200 p-6 rounded-lg shadow-lg w-1/3">
+            <h3 class="text-xl font-bold mb-4">Create New Chat</h3>
+            <%= if @form_error do %>
+              <p class="text-red-500 mb-4"><%= @form_error %></p>
+            <% end %>
+            <form phx-submit="create_chat" class="flex flex-col gap-4">
+              <input
+                name="chat_name"
+                type="text"
+                placeholder="Enter chat name"
+                class="p-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none text-gray-200"
+                required
+              />
+              <div class="flex justify-end gap-4">
+                <button type="button" class="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-click="toggle_create_chat_modal">
+                  Cancel
+                </button>
+                <button type="submit" class="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg">
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      <% end %>
+
+      <%= if @show_add_user_modal do %>
+        <div class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+          <div class="bg-gray-800 text-gray-200 p-6 rounded-lg shadow-lg w-1/3">
+            <h3 class="text-xl font-bold mb-4">Add User to Chat</h3>
+            <%= if @form_error do %>
+              <p class="text-red-500 mb-4"><%= @form_error %></p>
+            <% end %>
+            <form phx-submit="add_user" class="flex flex-col gap-4">
               <input
                 name="user_uuid"
                 type="text"
                 placeholder="Enter user UUID"
-                class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none text-gray-200"
+                class="p-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none text-gray-200"
                 required
               />
-              <button type="submit" class="mt-2 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg w-full">
-                Add User
-              </button>
+              <div class="flex justify-end gap-4">
+                <button type="button" class="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-click="toggle_add_user_modal">
+                  Cancel
+                </button>
+                <button type="submit" class="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg">
+                  Add
+                </button>
+              </div>
             </form>
-          <% end %>
+          </div>
         </div>
-      </div>
+      <% end %>
     </div>
   """
   end

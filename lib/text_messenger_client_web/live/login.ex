@@ -11,7 +11,32 @@ defmodule TextMessengerClientWeb.LoginPage do
     {:ok, socket}
   end
 
-  def render(assigns) do
+  def handle_event("toggle-auth", _params, socket) do
+    {:noreply, assign(socket, is_registering: !socket.assigns.is_registering)}
+  end
+
+  def handle_event("login", %{"username" => username, "password" => password}, socket) do
+    with {:ok, {token, _username, _user_id}} <- login(username, password) do
+      # Trigger the JavaScript hook event with the token
+      {:noreply, push_event(socket, "trigger_login_post", %{token: token})}
+    else
+      {:error, %{"error" => error}} -> {:noreply, assign(socket, message: error)}
+    end
+  end
+
+  def handle_event("register", %{"username" => username, "password" => password, "password_confirmation" => password_confirmation}, socket) do
+    if password == password_confirmation do
+      with {:ok, message} <- TextMessengerClient.UsersAPI.register(username, password) do
+        {:noreply, assign(socket, :message, message)}
+      else
+        {:error, details} -> {:noreply, assign(socket, message: format_error(details))}
+      end
+    else
+      {:noreply, assign(socket, :message, "Passwords do not match.")}
+    end
+  end
+
+    def render(assigns) do
     ~H"""
     <div id="auth-container" class="flex items-center justify-center w-screen h-screen bg-gradient-to-br from-gray-800 to-gray-900">
       <div class="w-full max-w-md p-8 bg-gray-800 text-gray-200 rounded-lg shadow-lg">
@@ -80,32 +105,6 @@ defmodule TextMessengerClientWeb.LoginPage do
       </div>
     </div>
     """
-  end
-
-  def handle_event("toggle-auth", _params, socket) do
-    {:noreply, assign(socket, is_registering: !socket.assigns.is_registering)}
-  end
-
-  def handle_event("login", %{"username" => username, "password" => password}, socket) do
-    with {:ok, {token, _username, _user_id}} <- login(username, password) do
-      # Trigger the JavaScript hook event with the token
-      {:noreply, push_event(socket, "trigger_login_post", %{token: token})}
-      #{:noreply, socket}
-    else
-      {:error, %{"error" => error}} -> {:noreply, assign(socket, message: error)}
-    end
-  end
-
-  def handle_event("register", %{"username" => username, "password" => password, "password_confirmation" => password_confirmation}, socket) do
-    if password == password_confirmation do
-      with {:ok, message}<- TextMessengerClient.UsersAPI.register(username, password) do
-        {:noreply, assign(socket, :message, message)}
-      else
-        {:error, details} -> {:noreply, assign(socket, message: format_error(details))}
-      end
-    else
-      {:noreply, assign(socket, :message, "Passwords do not match.")}
-    end
   end
 
   defp format_error(details) do
