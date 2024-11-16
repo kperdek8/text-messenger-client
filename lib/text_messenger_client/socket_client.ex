@@ -2,30 +2,24 @@ defmodule TextMessengerClient.SocketClient do
   require Logger
 
   defmodule WebSocket do
-    defstruct [:socket, :channel, :user_id, :chat_id, :liveview_pid]
+    defstruct [:socket, :channel, :token, :chat_id, :liveview_pid]
   end
 
-  def start(user_id, chat_id, liveview_pid) do
+  def start(token, liveview_pid) do
     socket_url = Application.get_env(:text_messenger_client, :socket_url)
 
     {:ok, socket} = PhoenixClient.Socket.start_link(
       url: socket_url,
-      params: %{user_id: user_id}
+      params: %{token: token}
     )
 
     wait_for_connection(socket)
 
-    case join_chat(socket, chat_id) do
-      {:ok, channel} ->
-        {:ok, %WebSocket{socket: socket, channel: channel, user_id: user_id, chat_id: chat_id, liveview_pid: liveview_pid}}
-      {:error, reason} ->
-        Logger.error("Failed to join chat room: #{inspect(reason)}")
-        {:error, reason}
-    end
+    {:ok, %WebSocket{socket: socket, channel: nil, token: token, chat_id: nil, liveview_pid: liveview_pid}}
   end
 
-  def send_message(%WebSocket{channel: channel, user_id: user_id}, content) do
-    payload = %{user_id: user_id, content: content}
+  def send_message(%WebSocket{channel: channel}, content) do
+    payload = %{content: content}
 
     case PhoenixClient.Channel.push_async(channel, "new_message", payload) do
       :ok -> :ok
@@ -35,8 +29,8 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def add_user(%WebSocket{channel: channel, user_id: user_id}, target_user_id) do
-    payload = %{user_id: user_id, target_user_id: target_user_id}
+  def add_user(%WebSocket{channel: channel}, target_user_id) do
+    payload = %{ target_user_id: target_user_id}
 
     case PhoenixClient.Channel.push_async(channel, "add_user", payload) do
       :ok -> :ok
@@ -47,7 +41,9 @@ defmodule TextMessengerClient.SocketClient do
   end
 
   def change_chat(%WebSocket{socket: socket, channel: channel} = websocket, new_chat_id) do
-    PhoenixClient.Channel.leave(channel)
+    if channel != nil do
+      PhoenixClient.Channel.leave(channel)
+    end
 
     case join_chat(socket, new_chat_id) do
       {:ok, new_channel} ->

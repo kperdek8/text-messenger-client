@@ -11,11 +11,11 @@ defmodule TextMessengerClientWeb.HomePage do
     else
       with {:ok, socket} <- assign_initial_state(socket, token),
            {:ok, socket} <- extract_logged_in_user_data(socket),
+           {:ok, socket} <- connect_to_websocket(socket),
            {:ok, socket} <- fetch_chats(socket),
            {:ok, socket} <- open_first_chat(socket),
            {:ok, socket} <- fetch_messages(socket),
-           {:ok, socket} <- fetch_users(socket),
-           {:ok, socket} <- connect_to_websocket(socket) do
+           {:ok, socket} <- fetch_users(socket) do
         {:ok, socket}
       else
         {:redirect, socket} ->
@@ -35,20 +35,22 @@ defmodule TextMessengerClientWeb.HomePage do
   def handle_event("select_chat", %{"id" => id}, socket) do
     {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, id)
 
-    {:ok, socket} =
-      socket
-        |> assign(selected_chat: id, websocket: new_websocket)
-        |> fetch_messages()
-    {:noreply, socket}
+    with socket <- assign(socket, selected_chat: id, websocket: new_websocket),
+         {:ok, socket} <- fetch_messages(socket),
+         {:ok, socket} <- fetch_users(socket) do
+      {:noreply, socket}
+    else
+      {:redirect, socket} -> {:noreply, socket}
+    end
   end
 
   def handle_event("toggle_create_chat_modal", _params, socket) do
-    socket = assign(socket, show_create_chat_modal: !socket.assigns.show_create_chat_modal)
+    socket = assign(socket, show_create_chat_modal: !socket.assigns.show_create_chat_modal, form_error: nil)
     {:noreply, socket}
   end
 
   def handle_event("toggle_add_user_modal", _params, socket) do
-    socket = assign(socket, show_add_user_modal: !socket.assigns.show_add_user_modal)
+    socket = assign(socket, show_add_user_modal: !socket.assigns.show_add_user_modal, form_error: nil)
     {:noreply, socket}
   end
 
@@ -70,6 +72,10 @@ defmodule TextMessengerClientWeb.HomePage do
       IO.inspect("Adding user with UUID: #{user_uuid}")
       {:noreply, assign(socket, show_add_user_modal: false, form_error: nil)}
     end
+  end
+
+  def handle_event("leave_chat", _params, socket) do
+    {:noreply, socket}
   end
 
   def handle_info({:remove_user, user_id}, socket) do
@@ -141,25 +147,38 @@ defmodule TextMessengerClientWeb.HomePage do
             <input
               name="message"
               type="text"
-              placeholder="Type your message..."
-              class="flex-1 p-2 border border-gray-700 bg-gray-800 text-gray-200 rounded-lg focus:outline-none"
-              />
-            <button type="submit" class="ml-2 p-2 bg-blue-500 text-white rounded-lg">Send</button>
+              placeholder={"#{if @selected_chat, do: "Type your message...", else: "Join or create chat to send messages"}"}
+              class={"flex-1 p-2 border rounded-lg focus:outline-none #{if @selected_chat, do: "bg-gray-800 text-gray-200", else: "bg-gray-700 text-gray-500 cursor-not-allowed"}"}
+              disabled={@selected_chat == nil}
+            />
+            <button
+              type="submit"
+              class={"ml-2 p-2 rounded-lg text-white #{if @selected_chat, do: "bg-blue-500", else: "bg-gray-500 cursor-not-allowed"}"}
+              disabled={@selected_chat == nil}
+            >
+              Send
+            </button>
           </form>
         </div>
       </div>
       <!-- User List Sidebar -->
-      <div id="user_list" class="w-1/6 flex flex-col h-full border-gray-700">
-        <div id="chat_members" class="flex flex-col h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
-          <%= for %User{} = user <- @users do %>
-            <.live_component module={TextMessengerClientWeb.UserPreviewComponent} id={user.id} user={user} />
-          <% end %>
-          <!-- Add User to Chat Button (Below User List) -->
-          <button class="mt-4 p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg w-full" phx-click="toggle_add_user_modal">
-            Add User to Chat
-          </button>
+      <%= if @selected_chat do %>
+        <div id="user_list" class="w-1/6 flex flex-col h-full border-gray-700">
+          <div id="chat_members" class="flex flex-col h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
+            <%= for %User{} = user <- @users do %>
+              <.live_component module={TextMessengerClientWeb.UserPreviewComponent} id={user.id} user={user} />
+            <% end %>
+            <!-- Add User to Chat Button -->
+            <button class="mt-4 p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg w-full" phx-click="toggle_add_user_modal">
+              Add User to Chat
+            </button>
+            <!-- Leave chat button -->
+            <button class="mt-4 p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg w-full" phx-click="leave_chat">
+              Leave chat
+            </button>
+          </div>
         </div>
-      </div>
+      <%=end%>
 
       <!-- Modals -->
       <%= if @show_create_chat_modal do %>
@@ -242,22 +261,32 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp fetch_chats(socket) do
-    IO.inspect("Unexpected error when fetching chats")
-    {:error, socket}
+    {:ok, socket}
   end
 
   defp open_first_chat(socket) when is_map_key(socket.assigns, :chats) do
-    first_chat_id = socket.assigns.chats |> List.first() |> Map.get(:id)
-    {:ok, socket |> assign(selected_chat: first_chat_id)}
+    first_chat_id =
+      socket.assigns.chats
+      |> List.first()
+      |> case do
+           nil -> nil
+           chat -> Map.get(chat, :id)
+         end
+
+    case first_chat_id do
+      nil -> {:ok, socket |> assign(selected_chat: nil)}
+      id ->
+        {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, id)
+        {:ok, socket |> assign(selected_chat: id, websocket: new_websocket)}
+    end
   end
 
   defp open_first_chat(socket) do
-    IO.inspect("Unexpected error when opening first chat")
-    {:error, socket}
+    {:ok, socket}
   end
 
-  defp fetch_users(%{assigns: %{token: token}} = socket) when not is_nil(token) do
-    with %Users{users: users} <- UsersAPI.fetch_users(token) do
+  defp fetch_users(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
+    with %Users{users: users} <- UsersAPI.fetch_chat_members(token, id) do
       {:ok, socket |> assign(users: users)}
     else
       {:error, "token_expired"} ->
@@ -269,12 +298,11 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp fetch_users(socket) do
-    IO.inspect("Unexpected error when fetching users")
-    {:error, socket}
+    {:ok, socket |> assign(users: [])}
   end
 
   defp fetch_messages(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
-    with %ChatMessages{messages: messages} <- MessagesAPI.fetch_messages(id, token) do
+    with %ChatMessages{messages: messages} <- MessagesAPI.fetch_messages(token, id) do
       {:ok, socket |> assign(messages: messages)}
     else
       {:error, "token_expired"} ->
@@ -286,12 +314,11 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp fetch_messages(socket) do
-    IO.inspect("Unexpected error when fetching messages")
-    {:error, socket}
+    {:ok, socket |> assign(messages: [])}
   end
 
-  defp connect_to_websocket(%{assigns: %{user_id: user_id, selected_chat: chat_id}} = socket) do
-    {:ok, websocket} = TextMessengerClient.SocketClient.start(user_id, chat_id, socket.root_pid)
+  defp connect_to_websocket(%{assigns: %{token: token}} = socket) do
+    {:ok, websocket} = TextMessengerClient.SocketClient.start(token, socket.root_pid)
     {:ok, socket |> assign(websocket: websocket)}
   end
 
