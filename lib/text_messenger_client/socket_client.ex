@@ -46,8 +46,8 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def change_chat(%WebSocket{socket: socket} = websocket, new_chat_id) do
-    PhoenixClient.Channel.leave(websocket.channel)
+  def change_chat(%WebSocket{socket: socket, channel: channel} = websocket, new_chat_id) do
+    PhoenixClient.Channel.leave(channel)
 
     case join_chat(socket, new_chat_id) do
       {:ok, new_channel} ->
@@ -81,7 +81,11 @@ defmodule TextMessengerClient.SocketClient do
   end
 
   def stop(%WebSocket{channel: channel, socket: socket}) do
-    PhoenixClient.Channel.leave(channel)
-    PhoenixClient.Socket.stop(socket)
+    if Process.alive?(channel) do
+      PhoenixClient.Channel.leave(channel)
+    end
+    if Process.alive?(socket) do
+      PhoenixClient.Socket.stop(socket)
+    end
   end
 end

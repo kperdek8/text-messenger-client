@@ -1,25 +1,29 @@
 defmodule TextMessengerClientWeb.HomePage do
   use TextMessengerClientWeb, :live_view
-  import TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI}
-  alias TextMessengerClient.Protobuf.{ChatMessage, User, Chat}
-
-  #TODO: https://daisyui.com/components/modal/
+  alias TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI}
+  alias TextMessengerClient.Protobuf.{ChatMessage, ChatMessages, User, Users, Chat, Chats}
+  alias TextMessengerClient.Helpers.JWT
 
   def mount(_params, session, socket) do
     token = Map.get(session, "token", nil)
-    if token == nil do
+    if is_nil(token) do
       {:ok, socket |> redirect(to: "/login")}
     else
-      chats = fetch_chats().chats
-      messages = fetch_messages("0f3649a5-64fb-4828-8bd0-21cf27d3f1db").messages
-      users = fetch_users().users
-
-      chat_id = "52853901-722c-4ad4-b53a-06d2e2b8416f"
-      user_id = "391a04bb-d60d-4c07-b11d-85527e68ccf2"
-
-      {:ok, websocket} = TextMessengerClient.SocketClient.start(user_id, chat_id, self())
-
-      {:ok, assign(socket, websocket: websocket, messages: messages, chats: chats, selected_chat: chat_id, users: users, token: token, show_create_chat_modal: false, show_add_user_modal: false, form_error: nil)}
+      with {:ok, socket} <- assign_initial_state(socket, token),
+           {:ok, socket} <- extract_logged_in_user_data(socket),
+           {:ok, socket} <- fetch_chats(socket),
+           {:ok, socket} <- open_first_chat(socket),
+           {:ok, socket} <- fetch_messages(socket),
+           {:ok, socket} <- fetch_users(socket),
+           {:ok, socket} <- connect_to_websocket(socket) do
+        {:ok, socket}
+      else
+        {:redirect, socket} ->
+          {:ok, socket}
+        _ ->
+          IO.inspect("Unexpected error occured")
+          {:ok, socket}
+      end
     end
   end
 
@@ -31,7 +35,10 @@ defmodule TextMessengerClientWeb.HomePage do
   def handle_event("select_chat", %{"id" => id}, socket) do
     {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, id)
 
-    socket = assign(socket, websocket: new_websocket, selected_chat: id, messages: fetch_messages(id).messages)
+    {:ok, socket} =
+      socket
+        |> assign(selected_chat: id, websocket: new_websocket)
+        |> fetch_messages()
     {:noreply, socket}
   end
 
@@ -65,6 +72,12 @@ defmodule TextMessengerClientWeb.HomePage do
     end
   end
 
+  def handle_info({:remove_user, user_id}, socket) do
+    # Replace with actual logic to remove the user
+    users = Enum.reject(socket.assigns.users, &(&1.id == user_id))
+    {:noreply, assign(socket, users: users)}
+  end
+
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: payload}, socket) do
     socket = assign(socket, messages: [%ChatMessage{id: payload["message_id"], content: payload["content"], user_id: payload["user_id"]} | socket.assigns.messages])
     {:noreply, socket}
@@ -89,7 +102,7 @@ defmodule TextMessengerClientWeb.HomePage do
 
   def render(assigns) do
 	~H"""
-  	<div id="main" class="w-screen h-screen flex bg-black gap-4 p-2">
+  	<div id="main" class="w-screen h-screen flex bg-black gap-4 p-2 relative">
       <!-- Left side -->
       <div id="left_side" class="flex flex-col w-1/5 h-full bg-gray-900 p-2 border-gray-700 rounded-lg">
         <div id="chat_list" class="flex flex-col w-full h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
@@ -103,9 +116,8 @@ defmodule TextMessengerClientWeb.HomePage do
         </div>
         <!-- Current user + Logout -->
         <div id="logout-container" class="flex justify-between w-full text-white">
-          <div class="flex flex-col flex-shrink w-full min-w-0">
-            <p class="truncate">Logged in as:</p>
-            <p class="truncate">DO IMPLEMENTACJI</p>
+          <div class="flex flex-shrink w-full h-full min-w-0 mx-2 items-center">
+            <p class="truncate">Logged in as: <strong><%= @username %></strong></p>
           </div>
           <button id="logout-button" class="flex-shrink p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-hook="SubmitLogoutForm">
             Logout
@@ -139,8 +151,8 @@ defmodule TextMessengerClientWeb.HomePage do
       <!-- User List Sidebar -->
       <div id="user_list" class="w-1/6 flex flex-col h-full border-gray-700">
         <div id="chat_members" class="flex flex-col h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
-          <%= for %User{id: id, name: name} <- @users do %>
-            <.live_component module={TextMessengerClientWeb.UserPreviewComponent} id={id} username={name} />
+          <%= for %User{} = user <- @users do %>
+            <.live_component module={TextMessengerClientWeb.UserPreviewComponent} id={user.id} user={user} />
           <% end %>
           <!-- Add User to Chat Button (Below User List) -->
           <button class="mt-4 p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg w-full" phx-click="toggle_add_user_modal">
@@ -207,6 +219,95 @@ defmodule TextMessengerClientWeb.HomePage do
       <% end %>
     </div>
   """
+  end
+
+  defp assign_initial_state(socket, token) do
+    {:ok,
+     socket
+       |> assign(token: token)
+       |> assign(user_id: "391a04bb-d60d-4c07-b11d-85527e68ccf2") # Replace with actual JWT decoding
+       |> assign(show_create_chat_modal: false, show_add_user_modal: false, form_error: nil)}
+  end
+
+  defp fetch_chats(%{assigns: %{token: token}} = socket) when not is_nil(token) do
+    with %Chats{chats: chats} <- ChatsAPI.fetch_chats(token) do
+      {:ok, socket |> assign(chats: chats)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching chats")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_chats(socket) do
+    IO.inspect("Unexpected error when fetching chats")
+    {:error, socket}
+  end
+
+  defp open_first_chat(socket) when is_map_key(socket.assigns, :chats) do
+    first_chat_id = socket.assigns.chats |> List.first() |> Map.get(:id)
+    {:ok, socket |> assign(selected_chat: first_chat_id)}
+  end
+
+  defp open_first_chat(socket) do
+    IO.inspect("Unexpected error when opening first chat")
+    {:error, socket}
+  end
+
+  defp fetch_users(%{assigns: %{token: token}} = socket) when not is_nil(token) do
+    with %Users{users: users} <- UsersAPI.fetch_users(token) do
+      {:ok, socket |> assign(users: users)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching users")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_users(socket) do
+    IO.inspect("Unexpected error when fetching users")
+    {:error, socket}
+  end
+
+  defp fetch_messages(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
+    with %ChatMessages{messages: messages} <- MessagesAPI.fetch_messages(id, token) do
+      {:ok, socket |> assign(messages: messages)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching messages")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_messages(socket) do
+    IO.inspect("Unexpected error when fetching messages")
+    {:error, socket}
+  end
+
+  defp connect_to_websocket(%{assigns: %{user_id: user_id, selected_chat: chat_id}} = socket) do
+    {:ok, websocket} = TextMessengerClient.SocketClient.start(user_id, chat_id, socket.root_pid)
+    {:ok, socket |> assign(websocket: websocket)}
+  end
+
+  defp extract_logged_in_user_data(%{assigns: %{token: token}} = socket) do
+    with {:ok, payload} <- JWT.decode_payload(token),
+         user_id <- payload["sub"],
+         username <- payload["username"] do
+      socket =
+        socket
+        |> assign(username: username)
+        |> assign(user_id: user_id)
+      {:ok, socket}
+    else
+      {:error, reason} ->
+        IO.inspect(reason, label: "Error while extracting user id from token")
+    end
   end
 
   def terminate(_reason, socket) do

@@ -1,4 +1,4 @@
-defmodule TextMessengerClient.Crypto do
+defmodule TextMessengerClient.Helpers.Crypto do
   @moduledoc """
   Module for generating and managing RSA keys and symmetric encryption keys.
   """

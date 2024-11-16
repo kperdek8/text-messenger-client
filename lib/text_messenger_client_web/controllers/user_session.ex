@@ -3,7 +3,7 @@ defmodule TextMessengerClientWeb.UserSessionController do
 
   def login(conn, %{"token" => token}) do
     conn
-    |> put_session(:token, Base.url_encode64(token))
+    |> put_session(:token, token)
     |> redirect(to: ~p"/")
   end
 
