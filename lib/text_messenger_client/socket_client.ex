@@ -1,11 +1,13 @@
 defmodule TextMessengerClient.SocketClient do
   require Logger
 
+  alias TextMessengerClient.Helpers.JWT
+
   defmodule WebSocket do
-    defstruct [:socket, :channel, :token, :chat_id, :liveview_pid]
+    defstruct [:socket, :chat_channel, :notif_channel, :token, :chat_id, :liveview_pid]
   end
 
-  def start(token, liveview_pid) do
+  def start(token) do
     socket_url = Application.get_env(:text_messenger_client, :socket_url)
 
     {:ok, socket} = PhoenixClient.Socket.start_link(
@@ -14,11 +16,18 @@ defmodule TextMessengerClient.SocketClient do
     )
 
     wait_for_connection(socket)
+    notif_channel =
+      case join_notif_channel(socket, token) do
+        {:ok, channel} -> channel
+        {:error, %{"reason" => reason}} ->
+          IO.inspect("Could not join notification channel: #{reason}")
+          nil
+      end
 
-    {:ok, %WebSocket{socket: socket, channel: nil, token: token, chat_id: nil, liveview_pid: liveview_pid}}
+    {:ok, %WebSocket{socket: socket, chat_channel: nil, notif_channel: notif_channel, token: token, chat_id: nil}}
   end
 
-  def send_message(%WebSocket{channel: channel}, content) do
+  def send_message(%WebSocket{chat_channel: channel}, content) do
     payload = %{content: content}
 
     case PhoenixClient.Channel.push_async(channel, "new_message", payload) do
@@ -29,8 +38,8 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def add_user(%WebSocket{channel: channel}, target_user_id) do
-    payload = %{ target_user_id: target_user_id}
+  def add_user(%WebSocket{chat_channel: channel}, target_user_id) do
+    payload = %{user_id: target_user_id}
 
     case PhoenixClient.Channel.push_async(channel, "add_user", payload) do
       :ok -> :ok
@@ -40,26 +49,46 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def change_chat(%WebSocket{socket: socket, channel: channel} = websocket, new_chat_id) do
+  def kick_user(%WebSocket{chat_channel: channel}, target_user_id) do
+    payload = %{user_id: target_user_id}
+
+    case PhoenixClient.Channel.push_async(channel, "kick_user", payload) do
+      :ok -> :ok
+      {:error, reason} ->
+        Logger.error("Failed to push add_user: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def change_chat(%WebSocket{socket: socket, chat_channel: channel} = websocket, new_chat_id) do
     if channel != nil do
       PhoenixClient.Channel.leave(channel)
     end
 
     case join_chat(socket, new_chat_id) do
       {:ok, new_channel} ->
-        {:ok, %WebSocket{websocket | channel: new_channel, chat_id: new_chat_id}}
+        {:ok, %WebSocket{websocket | chat_channel: new_channel, chat_id: new_chat_id}}
       {:error, reason} ->
         Logger.error("Failed to join new chat room: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
-  def handle_message(%PhoenixClient.Message{event: event, payload: payload}, %WebSocket{liveview_pid: liveview_pid}) do
-    send(liveview_pid, {:socket_event, event, payload})
-  end
-
   defp join_chat(socket, chat_id) do
     topic = "chat:#{chat_id}"
+
+    case PhoenixClient.Channel.join(socket, topic) do
+      {:ok, _, channel} ->
+        {:ok, channel}
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp join_notif_channel(socket, token) do
+    {:ok, payload} = JWT.decode_payload(token)
+    user_id = payload["sub"]
+    topic = "notifications:#{user_id}"
 
     case PhoenixClient.Channel.join(socket, topic) do
       {:ok, _, channel} ->
@@ -76,9 +105,9 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def stop(%WebSocket{channel: channel, socket: socket}) do
-    if Process.alive?(channel) do
-      PhoenixClient.Channel.leave(channel)
+  def stop(%WebSocket{chat_channel: chat_channel, socket: socket}) do
+    if Process.alive?(chat_channel) do
+      PhoenixClient.Channel.leave(chat_channel)
     end
     if Process.alive?(socket) do
       PhoenixClient.Socket.stop(socket)

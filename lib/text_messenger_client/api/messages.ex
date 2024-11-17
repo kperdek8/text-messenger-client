@@ -3,7 +3,6 @@ defmodule TextMessengerClient.MessagesAPI do
   import TextMessengerClient.RequestHandler
   alias TextMessengerClient.Protobuf.ChatMessages
 
-  # TODO: Handle 404
   def fetch_messages(token, id) do
     api_url = Application.get_env(:text_messenger_client, :api_url)
     endpoint_url = "#{api_url}/chats/#{id}/messages"

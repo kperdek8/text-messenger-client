@@ -64,38 +64,79 @@ defmodule TextMessengerClientWeb.HomePage do
     end
   end
 
-  def handle_event("add_user", %{"user_uuid" => user_uuid}, socket) do
-    if String.trim(user_uuid) == "" do
+  def handle_event("add_user", %{"user_uuid" => user_id}, socket) do
+    if String.trim(user_id) == "" do
       {:noreply, assign(socket, form_error: "User UUID cannot be empty")}
     else
-      # Placeholder for actual user addition logic
-      IO.inspect("Adding user with UUID: #{user_uuid}")
+      TextMessengerClient.SocketClient.add_user(socket.assigns.websocket, user_id)
       {:noreply, assign(socket, show_add_user_modal: false, form_error: nil)}
     end
   end
 
-  def handle_event("leave_chat", _params, socket) do
+  def handle_event("leave_chat", _params, %{assigns: %{user_id: user_id, websocket: websocket}} = socket) do
+    TextMessengerClient.SocketClient.kick_user(websocket, user_id)
     {:noreply, socket}
   end
 
-  def handle_info({:remove_user, user_id}, socket) do
-    # Replace with actual logic to remove the user
-    users = Enum.reject(socket.assigns.users, &(&1.id == user_id))
-    {:noreply, assign(socket, users: users)}
-  end
-
-  def handle_info(%PhoenixClient.Message{event: "new_message", payload: payload}, socket) do
-    socket = assign(socket, messages: [%ChatMessage{id: payload["message_id"], content: payload["content"], user_id: payload["user_id"]} | socket.assigns.messages])
+  def handle_info({:kick_user, user_id}, socket) do
+    TextMessengerClient.SocketClient.kick_user(socket.assigns.websocket, user_id)
     {:noreply, socket}
   end
 
-  # TODO
-  def handle_info(%PhoenixClient.Message{event: "add_user", payload: _payload}, socket) do
+  def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => content, "user_id" => user_id}}, socket) do
+    socket = assign(socket, messages: [%ChatMessage{id: id, content: content, user_id: user_id} | socket.assigns.messages])
     {:noreply, socket}
   end
 
-  def handle_info(%PhoenixClient.Message{event: event}, socket) do
-    IO.inspect(event, label: "Unsupported socket event")
+  def handle_info(%PhoenixClient.Message{event: "add_user", payload: %{"user_id" => user_id}}, socket) do
+    case fetch_user(socket, user_id) do
+      {:ok, socket} -> {:noreply, socket}
+      {:redirect, socket} -> {:noreply, socket}
+    end
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "kick_user", payload: %{"user_id" => user_id}}, socket) do
+    {:ok, socket} = remove_user(socket, user_id)
+    {:noreply, socket}
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "added_to_chat", payload: %{"chat_id" => chat_id}}, socket) do
+    case fetch_chat(socket, chat_id) do
+      {:ok, socket} -> {:noreply, socket}
+      {:redirect, socket} -> {:noreply, socket}
+    end
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "removed_from_chat", payload: %{"chat_id" => chat_id}}, socket) do
+    {:ok, socket} = remove_chat(socket, chat_id)
+    if socket.assigns.selected_chat == chat_id do
+      with {:ok, socket} <- open_first_chat(socket),
+           {:ok, socket} <- fetch_messages(socket),
+           {:ok, socket} <- fetch_users(socket) do
+        {:noreply, socket}
+      else
+        {:redirect, socket} ->
+          {:noreply, socket}
+        _ ->
+          IO.inspect("Unexpected error occured")
+          {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "phx_close", payload: _payload}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "phx_reply"}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info(%PhoenixClient.Message{} = message, socket) do
+    IO.inspect(message, label: "Unsupported socket message")
     {:noreply, socket}
   end
 
@@ -115,25 +156,39 @@ defmodule TextMessengerClientWeb.HomePage do
           <%= for %Chat{id: id, name: name} <- @chats do %>
             <.live_component module={TextMessengerClientWeb.ChatPreviewComponent} id={id} message={"TODO: Zaimplementuj podgląd ostatniej wiadomość"} name={name} selected_chat={@selected_chat} />
           <% end %>
+
           <!-- Create New Chat Button (Below Chat List) -->
           <button class="mt-4 p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg w-full" phx-click="toggle_create_chat_modal">
             <p>Create New Chat</p>
           </button>
         </div>
+
         <!-- Current user + Logout -->
         <div id="logout-container" class="flex justify-between w-full text-white">
           <div class="flex flex-shrink w-full h-full min-w-0 mx-2 items-center">
-            <p class="truncate">Logged in as: <strong><%= @username %></strong></p>
+            <div class="flex flex-col">
+              <p class="truncate">Logged in as: <strong><%= @username %></strong></p>
+              <p
+                class="truncate text-xs max-w-xs overflow-hidden text-ellipsis cursor-pointer"
+                title={@user_id}
+                id="user-id"
+                phx-hook="CopyUUID"
+              >
+                UUID: <%= @user_id %>
+              </p>
+            </div>
           </div>
           <button id="logout-button" class="flex-shrink p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-hook="SubmitLogoutForm">
             Logout
           </button>
+
           <!-- Hidden logout form -->
           <form id="logout-form" action="/logout" method="post" style="display: none;">
             <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
           </form>
         </div>
       </div>
+
       <!-- Chat Window -->
       <div id="chat" class="flex flex-col grow h-full border-gray-700">
         <div id="chat_messages" class="flex flex-col-reverse w-full h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
@@ -141,6 +196,7 @@ defmodule TextMessengerClientWeb.HomePage do
             <.live_component module={TextMessengerClientWeb.ChatMessageComponent} id={id} message={message} user={get_user_name(user_id, @users)} />
           <% end %>
         </div>
+
         <!-- Message Input Box -->
         <div id="inputbox" class="flex p-2">
           <form phx-submit="send_message" class="flex w-full">
@@ -161,6 +217,7 @@ defmodule TextMessengerClientWeb.HomePage do
           </form>
         </div>
       </div>
+
       <!-- User List Sidebar -->
       <%= if @selected_chat do %>
         <div id="user_list" class="w-1/6 flex flex-col h-full border-gray-700">
@@ -178,7 +235,7 @@ defmodule TextMessengerClientWeb.HomePage do
             </button>
           </div>
         </div>
-      <%=end%>
+      <% end %>
 
       <!-- Modals -->
       <%= if @show_create_chat_modal do %>
@@ -244,8 +301,23 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok,
      socket
        |> assign(token: token)
-       |> assign(user_id: "391a04bb-d60d-4c07-b11d-85527e68ccf2") # Replace with actual JWT decoding
        |> assign(show_create_chat_modal: false, show_add_user_modal: false, form_error: nil)}
+  end
+
+  defp fetch_chat(%{assigns: %{token: token, chats: chats}} = socket, id) when not is_nil(token) do
+    with %Chat{} = chat <- ChatsAPI.fetch_chat(token, id) do
+      {:ok, socket |> assign(chats: [chat | chats])}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      {:error, reason} ->
+        IO.inspect(reason, label: "Unexpected error when fetching chat")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_chat(socket, _id) do
+    {:ok, socket}
   end
 
   defp fetch_chats(%{assigns: %{token: token}} = socket) when not is_nil(token) do
@@ -254,8 +326,8 @@ defmodule TextMessengerClientWeb.HomePage do
     else
       {:error, "token_expired"} ->
         {:redirect, socket |> redirect(to: "/login")}
-      _ ->
-        IO.inspect("Unexpected error when fetching chats")
+      {:error, reason} ->
+        IO.inspect(reason, label: "Unexpected error when fetching chats")
         {:error, socket}
     end
   end
@@ -285,6 +357,30 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, socket}
   end
 
+  defp remove_chat(%{assigns: %{chats: chats}} = socket, id) do
+    updated_chats =
+      chats
+      |> Enum.reject(fn chat -> chat.id == id end)
+
+    {:ok, socket |> assign(chats: updated_chats)}
+  end
+
+  defp fetch_user(%{assigns: %{token: token, users: users}} = socket, id) when not is_nil(token) do
+    with %User{} = user <- UsersAPI.fetch_user(token, id) do
+      {:ok, socket |> assign(users: [user | users])}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching chats")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_user(socket, _id) do
+    {:ok, socket}
+  end
+
   defp fetch_users(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
     with %Users{users: users} <- UsersAPI.fetch_chat_members(token, id) do
       {:ok, socket |> assign(users: users)}
@@ -299,6 +395,14 @@ defmodule TextMessengerClientWeb.HomePage do
 
   defp fetch_users(socket) do
     {:ok, socket |> assign(users: [])}
+  end
+
+  defp remove_user(%{assigns: %{users: users}} = socket, id) do
+    updated_users =
+      users
+      |> Enum.reject(fn user -> user.id == id end)
+
+    {:ok, socket |> assign(users: updated_users)}
   end
 
   defp fetch_messages(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
@@ -318,7 +422,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp connect_to_websocket(%{assigns: %{token: token}} = socket) do
-    {:ok, websocket} = TextMessengerClient.SocketClient.start(token, socket.root_pid)
+    {:ok, websocket} = TextMessengerClient.SocketClient.start(token)
     {:ok, socket |> assign(websocket: websocket)}
   end
 

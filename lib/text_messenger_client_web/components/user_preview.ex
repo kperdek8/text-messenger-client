@@ -52,7 +52,7 @@ defmodule TextMessengerClientWeb.UserPreviewComponent do
   end
 
   def handle_event("remove_user", %{"id" => id}, socket) do
-    send(self(), {:remove_user, id}) # Notify the parent LiveView
+    send(self(), {:kick_user, id}) # Notify the parent LiveView
     {:noreply, assign(socket, menu_open: false)}
   end
 end

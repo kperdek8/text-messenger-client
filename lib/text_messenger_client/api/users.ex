@@ -51,8 +51,7 @@ defmodule TextMessengerClient.UsersAPI do
     end
   end
 
-  # TODO: Handle 404
-  def fetch_user(id, token) when is_integer(id) do
+  def fetch_user(token, id) do
     api_url = Application.get_env(:text_messenger_client, :api_url)
     endpoint_url = "#{api_url}/users/#{id}"
 

@@ -22,5 +22,18 @@ Hooks.SubmitLoginForm = {
   },
 };
 
+Hooks.CopyUUID = {
+  mounted() {
+    this.el.addEventListener("click", (event) => {
+      const text = this.el.innerText.replace("UUID: ", ""); // Extract the UUID part
+      navigator.clipboard.writeText(text).then(function () {
+        alert("UUID copied to clipboard!");
+      }).catch(function (err) {
+        alert("Failed to copy UUID: ", err);
+      });
+    });
+  }
+}
+
 // Export the Hooks object
 export default Hooks;
