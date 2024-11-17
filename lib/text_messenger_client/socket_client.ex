@@ -105,9 +105,12 @@ defmodule TextMessengerClient.SocketClient do
     end
   end
 
-  def stop(%WebSocket{chat_channel: chat_channel, socket: socket}) do
+  def stop(%WebSocket{chat_channel: chat_channel, notif_channel: notif_channel, socket: socket}) do
     if Process.alive?(chat_channel) do
       PhoenixClient.Channel.leave(chat_channel)
+    end
+    if Process.alive?(notif_channel) do
+      PhoenixClient.Channel.leave(notif_channel)
     end
     if Process.alive?(socket) do
       PhoenixClient.Socket.stop(socket)
