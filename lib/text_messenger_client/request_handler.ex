@@ -1,15 +1,15 @@
 defmodule TextMessengerClient.RequestHandler do
-  def fetch_request(endpoint, token \\ nil, custom_headers \\ [], opts \\ []) do
+  def fetch_request(endpoint, token \\ nil) do
     headers = [
       {"Content-Type", "application/json"},
       {"Accept", "application/x-protobuf"}
-    ] ++ custom_headers
+    ]
 
     headers = if token, do: [{"Authorization", "Bearer #{token}"} | headers], else: headers
 
     IO.inspect(endpoint, label: "Sending GET request")
 
-    case HTTPoison.get(endpoint, headers, opts) do
+    case HTTPoison.get(endpoint, headers) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
         {:ok, body}
 
@@ -33,21 +33,43 @@ defmodule TextMessengerClient.RequestHandler do
     end
   end
 
-  def post_request(endpoint, payload, token \\ nil, custom_headers \\ [], opts \\ []) do
+  def post_request(endpoint, payload, token \\ nil) do
     headers = [
-      {"Accept", "application/json"}
-    ] ++ custom_headers
+      {"Content-Type", "application/json"},
+      {"Accept", "application/json, application/x-protobuf"}
+    ]
 
     headers = if token, do: [{"Authorization", "Bearer #{token}"} | headers], else: headers
 
     IO.inspect(endpoint, label: "Sending POST request")
 
-    case HTTPoison.post(endpoint, payload, headers, opts) do
-      {:ok, %HTTPoison.Response{status_code: status_code, body: body}} ->
-        {:ok, status_code, Jason.decode!(body)}
+    case HTTPoison.post(endpoint, payload, headers) do
+      {:ok, %HTTPoison.Response{status_code: status_code, body: body, headers: response_headers}} ->
+        content_type = get_content_type(response_headers)
+
+        case content_type do
+          "application/json" ->
+            {:ok, status_code, Jason.decode!(body)}
+
+          "application/x-protobuf" ->
+            {:ok, status_code, body} # Leave protobuf decoding to calling function
+
+        _ ->
+          {:error, "Unsupported content type: #{content_type}"}
+      end
 
       {:error, %HTTPoison.Error{reason: reason}} ->
         {:error, "HTTP error: #{reason}"}
     end
+  end
+
+
+  defp get_content_type(headers) do
+    headers
+    |> Enum.find(fn {key, _} -> key == "content-type" end)
+    |> case do
+         nil -> nil
+         {"content-type", type}  -> String.split(type, ";") |> List.first()
+       end
   end
 end

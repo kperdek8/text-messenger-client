@@ -58,9 +58,8 @@ defmodule TextMessengerClientWeb.HomePage do
     if String.trim(chat_name) == "" do
       {:noreply, assign(socket, form_error: "Chat name cannot be empty")}
     else
-      # Placeholder for actual chat creation logic
-      IO.inspect("Creating chat with name: #{chat_name}")
-      {:noreply, assign(socket, show_create_chat_modal: false, form_error: nil)}
+      new_chat = ChatsAPI.create_chat(socket.assigns.token, chat_name)
+      {:noreply, assign(socket, show_create_chat_modal: false, form_error: nil, chats: [new_chat | socket.assigns.chats])}
     end
   end
 
@@ -166,10 +165,10 @@ defmodule TextMessengerClientWeb.HomePage do
         <!-- Current user + Logout -->
         <div id="logout-container" class="flex justify-between w-full text-white">
           <div class="flex flex-shrink w-full h-full min-w-0 mx-2 items-center">
-            <div class="flex flex-col">
-              <p class="truncate">Logged in as: <strong><%= @username %></strong></p>
+            <div class="flex flex-col min-w-0">
+              <p class="truncate overflow-hidden" title={@username}>Logged in as: <strong><%= @username %></strong></p>
               <p
-                class="truncate text-xs max-w-xs overflow-hidden text-ellipsis cursor-pointer"
+                class="truncate text-xs max-w-xs overflow-hidden cursor-pointer"
                 title={@user_id}
                 id="user-id"
                 phx-hook="CopyUUID"
@@ -178,7 +177,7 @@ defmodule TextMessengerClientWeb.HomePage do
               </p>
             </div>
           </div>
-          <button id="logout-button" class="flex-shrink p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-hook="SubmitLogoutForm">
+          <button id="logout-button" class="flex flex-shrink p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg" phx-hook="SubmitLogoutForm">
             Logout
           </button>
 

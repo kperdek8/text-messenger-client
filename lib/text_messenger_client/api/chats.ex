@@ -24,4 +24,17 @@ defmodule TextMessengerClient.ChatsAPI do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  def create_chat(token, name) do
+    api_url = Application.get_env(:text_messenger_client, :api_url)
+    params = URI.encode_query(%{name: name})
+    endpoint_url = "#{api_url}/chats/?#{params}"
+
+    with {:ok, 200, body} <- post_request(endpoint_url, "", token) do
+      Chat.decode(body)
+    else
+      {:ok, status_code, error} when status_code != 200 -> {:error, error}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 end
