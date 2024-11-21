@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package TextMessengerServer.Protobuf;
+package TextMessengerClient.Protobuf;
 
 message User {
   string id = 1; // UUID stored as string
@@ -35,9 +35,11 @@ message ChatMessages {
 
 message GroupKey {
     string chat_id = 1;
-    string user_id = 2;
-    optional int32 key_number = 3;
-    bytes encrypted_key = 4;
+    string recipient_id = 2;
+    string creator_id = 3;
+    optional int32 key_number = 4;
+    bytes encrypted_key = 5;
+    bytes signature = 6;
 }
 
 message GroupKeys {

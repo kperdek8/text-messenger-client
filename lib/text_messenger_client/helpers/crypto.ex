@@ -5,10 +5,10 @@ defmodule TextMessengerClient.Helpers.Crypto do
   # RSA Keys
   @rsa_key_size 2048
 
+  @block_size 16
+
   # Symmetric encryption key
   @group_key_length 32
-
-  @block_size 16
 
   alias TextMessengerClient.Protobuf.GroupKey
 
@@ -43,7 +43,7 @@ defmodule TextMessengerClient.Helpers.Crypto do
   def generate_group_key(private_key, key_length \\ @group_key_length) do
     key = :crypto.strong_rand_bytes(key_length)
     group_key = %GroupKey{
-      key: key
+      encrypted_key: key
     }
 
     serialized_group_key = GroupKey.encode(group_key)
@@ -84,7 +84,7 @@ defmodule TextMessengerClient.Helpers.Crypto do
 
   defp pkcs7_pad(data) do
     padding_size = @block_size - rem(byte_size(data), @block_size)
-    padding = <<padding_size::integer-size(8)>> |> :binary.copy(padding_size)
+    padding = :binary.copy(<<padding_size>>, padding_size)
     data <> padding
   end
 
@@ -92,5 +92,4 @@ defmodule TextMessengerClient.Helpers.Crypto do
     <<padding_size>> = binary_part(data, byte_size(data) - 1, 1)
     :binary.part(data, 0, byte_size(data) - padding_size)
   end
-
 end

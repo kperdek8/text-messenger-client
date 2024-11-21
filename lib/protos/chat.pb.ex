@@ -1,4 +1,4 @@
-defmodule TextMessengerServer.Protobuf.User do
+defmodule TextMessengerClient.Protobuf.User do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
@@ -7,33 +7,33 @@ defmodule TextMessengerServer.Protobuf.User do
   field :name, 2, type: :string
 end
 
-defmodule TextMessengerServer.Protobuf.Users do
+defmodule TextMessengerClient.Protobuf.Users do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
-  field :users, 1, repeated: true, type: TextMessengerServer.Protobuf.User
+  field :users, 1, repeated: true, type: TextMessengerClient.Protobuf.User
 end
 
-defmodule TextMessengerServer.Protobuf.Chat do
+defmodule TextMessengerClient.Protobuf.Chat do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :id, 1, type: :string
-  field :users, 2, repeated: true, type: TextMessengerServer.Protobuf.User
+  field :users, 2, repeated: true, type: TextMessengerClient.Protobuf.User
   field :name, 3, type: :string
 end
 
-defmodule TextMessengerServer.Protobuf.Chats do
+defmodule TextMessengerClient.Protobuf.Chats do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
-  field :chats, 1, repeated: true, type: TextMessengerServer.Protobuf.Chat
+  field :chats, 1, repeated: true, type: TextMessengerClient.Protobuf.Chat
 end
 
-defmodule TextMessengerServer.Protobuf.ChatMessage do
+defmodule TextMessengerClient.Protobuf.ChatMessage do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
@@ -45,37 +45,39 @@ defmodule TextMessengerServer.Protobuf.ChatMessage do
   field :timestamp, 5, type: :string
 end
 
-defmodule TextMessengerServer.Protobuf.ChatMessages do
+defmodule TextMessengerClient.Protobuf.ChatMessages do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
-  field :messages, 1, repeated: true, type: TextMessengerServer.Protobuf.ChatMessage
+  field :messages, 1, repeated: true, type: TextMessengerClient.Protobuf.ChatMessage
 end
 
-defmodule TextMessengerServer.Protobuf.GroupKey do
+defmodule TextMessengerClient.Protobuf.GroupKey do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :chat_id, 1, type: :string, json_name: "chatId"
-  field :user_id, 2, type: :string, json_name: "userId"
-  field :key_number, 3, proto3_optional: true, type: :int32, json_name: "keyNumber"
-  field :encrypted_key, 4, type: :bytes, json_name: "encryptedKey"
+  field :recipient_id, 2, type: :string, json_name: "recipientId"
+  field :creator_id, 3, type: :string, json_name: "creatorId"
+  field :key_number, 4, proto3_optional: true, type: :int32, json_name: "keyNumber"
+  field :encrypted_key, 5, type: :bytes, json_name: "encryptedKey"
+  field :signature, 6, type: :bytes
 end
 
-defmodule TextMessengerServer.Protobuf.GroupKeys do
+defmodule TextMessengerClient.Protobuf.GroupKeys do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :group_keys, 1,
     repeated: true,
-    type: TextMessengerServer.Protobuf.GroupKey,
+    type: TextMessengerClient.Protobuf.GroupKey,
     json_name: "groupKeys"
 end
 
-defmodule TextMessengerServer.Protobuf.EncryptionKey do
+defmodule TextMessengerClient.Protobuf.EncryptionKey do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
@@ -84,18 +86,18 @@ defmodule TextMessengerServer.Protobuf.EncryptionKey do
   field :encrypted_key, 2, type: :bytes, json_name: "encryptedKey"
 end
 
-defmodule TextMessengerServer.Protobuf.EncryptionKeys do
+defmodule TextMessengerClient.Protobuf.EncryptionKeys do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :encryption_keys, 1,
     repeated: true,
-    type: TextMessengerServer.Protobuf.EncryptionKey,
+    type: TextMessengerClient.Protobuf.EncryptionKey,
     json_name: "encryptionKeys"
 end
 
-defmodule TextMessengerServer.Protobuf.SignatureKey do
+defmodule TextMessengerClient.Protobuf.SignatureKey do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
@@ -104,13 +106,13 @@ defmodule TextMessengerServer.Protobuf.SignatureKey do
   field :encrypted_key, 2, type: :bytes, json_name: "encryptedKey"
 end
 
-defmodule TextMessengerServer.Protobuf.SignatureKeys do
+defmodule TextMessengerClient.Protobuf.SignatureKeys do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :signature_keys, 1,
     repeated: true,
-    type: TextMessengerServer.Protobuf.SignatureKey,
+    type: TextMessengerClient.Protobuf.SignatureKey,
     json_name: "signatureKeys"
 end
