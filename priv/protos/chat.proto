@@ -48,7 +48,7 @@ message GroupKeys {
 
 message EncryptionKey {
     string user_id = 1;
-    bytes encrypted_key = 2;
+    bytes public_key = 2;
 }
 
 message EncryptionKeys {
@@ -57,9 +57,19 @@ message EncryptionKeys {
 
 message SignatureKey {
     string user_id = 1;
-    bytes encrypted_key = 2;
+    bytes public_key = 2;
 }
 
 message SignatureKeys {
     repeated SignatureKey signature_keys = 1;
+}
+
+message UserKeys {
+  string user_id = 1;
+  optional bytes encryption_key = 2;
+  optional bytes signature_key = 3;
+}
+
+message UserKeysList {
+  repeated UserKeys user_keys = 1;
 }
