@@ -2,6 +2,7 @@ defmodule TextMessengerClient.SocketClient do
   require Logger
 
   alias TextMessengerClient.Helpers.JWT
+  alias TextMessengerClient.Protobuf.GroupKeys
 
   defmodule WebSocket do
     defstruct [:socket, :chat_channel, :notif_channel, :token, :chat_id, :liveview_pid]
@@ -31,6 +32,16 @@ defmodule TextMessengerClient.SocketClient do
     payload = %{content: content}
 
     case PhoenixClient.Channel.push_async(channel, "new_message", payload) do
+      :ok -> :ok
+      {:error, reason} ->
+        Logger.error("Failed to push new_message: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def send_keys(%WebSocket{chat_channel: channel}, %GroupKeys{} = keys) do
+    payload = %{"group_keys" => GroupKeys.encode(keys)}
+    case PhoenixClient.Channel.push_async(channel, "change_group_key", payload) do
       :ok -> :ok
       {:error, reason} ->
         Logger.error("Failed to push new_message: #{inspect(reason)}")

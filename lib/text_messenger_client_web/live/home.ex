@@ -2,7 +2,7 @@ defmodule TextMessengerClientWeb.HomePage do
   use TextMessengerClientWeb, :live_view
   alias TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI}
   alias TextMessengerClient.Protobuf.{ChatMessage, ChatMessages, User, Users, Chat, Chats}
-  alias TextMessengerClient.Helpers.JWT
+  alias TextMessengerClient.Helpers.{JWT, Crypto}
 
   def mount(_params, session, socket) do
     token = Map.get(session, "token", nil)
@@ -84,6 +84,10 @@ defmodule TextMessengerClientWeb.HomePage do
 
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => content, "user_id" => user_id}}, socket) do
     socket = assign(socket, messages: [%ChatMessage{id: id, content: content, user_id: user_id} | socket.assigns.messages])
+    {:noreply, socket}
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "change_key_request", payload: %{"chat_id" => chat_id}}, socket) do
     {:noreply, socket}
   end
 

@@ -83,7 +83,7 @@ defmodule TextMessengerClient.Protobuf.EncryptionKey do
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :user_id, 1, type: :string, json_name: "userId"
-  field :encrypted_key, 2, type: :bytes, json_name: "encryptedKey"
+  field :public_key, 2, type: :bytes, json_name: "publicKey"
 end
 
 defmodule TextMessengerClient.Protobuf.EncryptionKeys do
@@ -103,7 +103,7 @@ defmodule TextMessengerClient.Protobuf.SignatureKey do
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
 
   field :user_id, 1, type: :string, json_name: "userId"
-  field :encrypted_key, 2, type: :bytes, json_name: "encryptedKey"
+  field :public_key, 2, type: :bytes, json_name: "publicKey"
 end
 
 defmodule TextMessengerClient.Protobuf.SignatureKeys do
@@ -115,4 +115,25 @@ defmodule TextMessengerClient.Protobuf.SignatureKeys do
     repeated: true,
     type: TextMessengerClient.Protobuf.SignatureKey,
     json_name: "signatureKeys"
+end
+
+defmodule TextMessengerClient.Protobuf.UserKeys do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
+
+  field :user_id, 1, type: :string, json_name: "userId"
+  field :encryption_key, 2, proto3_optional: true, type: :bytes, json_name: "encryptionKey"
+  field :signature_key, 3, proto3_optional: true, type: :bytes, json_name: "signatureKey"
+end
+
+defmodule TextMessengerClient.Protobuf.UserKeysList do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.13.0"
+
+  field :user_keys, 1,
+    repeated: true,
+    type: TextMessengerClient.Protobuf.UserKeys,
+    json_name: "userKeys"
 end
