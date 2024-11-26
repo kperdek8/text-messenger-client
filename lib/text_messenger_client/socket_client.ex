@@ -40,9 +40,12 @@ defmodule TextMessengerClient.SocketClient do
   end
 
   def send_keys(%WebSocket{chat_channel: channel}, %GroupKeys{} = keys) do
-    payload = %{"group_keys" => GroupKeys.encode(keys)}
-    case PhoenixClient.Channel.push_async(channel, "change_group_key", payload) do
-      :ok -> :ok
+    payload = %{"group_keys" => Base.encode64(GroupKeys.encode(keys))}
+    case PhoenixClient.Channel.push(channel, "change_group_key", payload) do
+      {:ok, _message} ->
+        :ok
+      {:error, %{"error" => error}} ->
+        Logger.error("Error received from server: #{error}")
       {:error, reason} ->
         Logger.error("Failed to push new_message: #{inspect(reason)}")
         {:error, reason}

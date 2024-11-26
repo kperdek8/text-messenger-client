@@ -17,24 +17,28 @@ defmodule TextMessengerClient.Helpers.Crypto do
 
   ## Returns:
     - A tuple `{public_key, private_key}`:
-      - `public_key`: An RSA public key in the format `{:RSAPublicKey, modulus, public_exponent}`.
-      - `private_key`: An RSA private key in the format `{:RSAPrivateKey, :"two-prime", modulus, public_exponent, private_exponent, prime1, prime2, exponent1, exponent2, coefficient, otherPrimeInfos}`.
+      - `public_key`: An RSA public key in the format in binary format using DER encoding.
+      - `private_key`: An RSA private key in the format in binary format using DER encoding`.
 
   ## Notes:
     - The public exponent is set to `65537`, a commonly used value for RSA.
     - The key size is determined by the module attribute `@rsa_key_size`.
 
   ## Example:
-      {public_key, private_key} = generate_rsa_keys()
+    {public_key, private_key} = generate_rsa_keys()
   """
 
   def generate_rsa_keys() do
     {:RSAPrivateKey, :"two-prime", modulus, public_exponent, private_exponent, prime1, prime2, exponent1, exponent2, coefficient, otherPrimeInfos} =
       :public_key.generate_key({:rsa, @rsa_key_size, 65537})
 
-    private_key = {:RSAPrivateKey, :"two-prime", modulus, public_exponent, private_exponent, prime1, prime2, exponent1, exponent2, coefficient, otherPrimeInfos}
+    private_key =
+      {:RSAPrivateKey, :"two-prime", modulus, public_exponent, private_exponent, prime1, prime2, exponent1, exponent2, coefficient, otherPrimeInfos}
+      |> encode_key(:RSAPrivateKey)
 
-    public_key = {:RSAPublicKey, modulus, public_exponent}
+    public_key =
+      {:RSAPublicKey, modulus, public_exponent}
+      |> encode_key(:RSAPublicKey)
 
     {public_key, private_key}
   end
@@ -56,7 +60,8 @@ defmodule TextMessengerClient.Helpers.Crypto do
       write_key_to_file(public_key, :RSAPublicKey, "public_key.pem")
   """
   def write_key_to_file(key, type, filepath) do
-    pem_entry = :public_key.pem_entry_encode(type, key)
+    decoded_key = decode_key(key, type)
+    pem_entry = :public_key.pem_entry_encode(type, decoded_key)
     pem_data = :public_key.pem_encode([pem_entry])
 
     File.write(filepath, pem_data)
@@ -71,7 +76,7 @@ defmodule TextMessengerClient.Helpers.Crypto do
     - `filepath`: The path to the PEM file containing the key.
 
   ## Returns:
-    - The decoded key if the file was successfully read and parsed.
+    - `binary()`: Key encoded in DER format if the file was successfully read and parsed.
     - `{:error, reason}` if an error occurred during reading or decoding.
 
   ## Notes:
@@ -84,9 +89,11 @@ defmodule TextMessengerClient.Helpers.Crypto do
   def read_key_from_file(type, filepath) do
     with {:ok, pem_data} <- File.read(filepath),
          [pem_entry] <- :public_key.pem_decode(pem_data),
-         {:ok, key} <- :public_key.pem_entry_decode(pem_entry, type) do
-      key
+         key <- :public_key.pem_entry_decode(pem_entry, type),
+         encoded_key <- encode_key(key, type) do
+      {:ok, encoded_key}
     else
+      {:error, reason} -> {:error, reason}
       error -> error
     end
   end
@@ -103,13 +110,16 @@ defmodule TextMessengerClient.Helpers.Crypto do
     - A `GroupKeys` Protobuf struct containing the encrypted and signed keys for each chat member.
   """
   def generate_group_keys(members, creator_id, creator_signature_key, chat_id) do
+    decoded_creator_key = decode_key(creator_signature_key, :RSAPrivateKey)
+
     # Step 1: Generate a new random group key
     raw_key = generate_group_key()
 
     # Step 2: Encrypt and sign the group key for each chat member
     group_keys = Enum.map(members, fn {user_id, public_key} ->
+      decoded_public_key = decode_key(public_key, :RSAPublicKey)
       raw_key
-      |> encrypt_and_sign_group_key(creator_signature_key, public_key)
+      |> encrypt_and_sign_group_key(decoded_creator_key, decoded_public_key)
       |> add_group_key_metadata(creator_id, user_id, chat_id)
     end)
 

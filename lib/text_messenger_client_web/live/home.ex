@@ -1,8 +1,13 @@
 defmodule TextMessengerClientWeb.HomePage do
   use TextMessengerClientWeb, :live_view
-  alias TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI}
-  alias TextMessengerClient.Protobuf.{ChatMessage, ChatMessages, User, Users, Chat, Chats}
+  alias TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI, KeysAPI}
+  alias TextMessengerClient.Protobuf.{ChatMessage, ChatMessages, User, Users, Chat, Chats, GroupKeys, GroupKey, UserKeysList, UserKeys}
   alias TextMessengerClient.Helpers.{JWT, Crypto}
+
+  @sign_pub_key_path "sign_pub.pem"
+  @sign_priv_key_path "sign_priv.pem"
+  @enc_pub_key_path "enc_pub.pem"
+  @enc_priv_key_path "enc_priv.pem"
 
   def mount(_params, session, socket) do
     token = Map.get(session, "token", nil)
@@ -15,7 +20,11 @@ defmodule TextMessengerClientWeb.HomePage do
            {:ok, socket} <- fetch_chats(socket),
            {:ok, socket} <- open_first_chat(socket),
            {:ok, socket} <- fetch_messages(socket),
-           {:ok, socket} <- fetch_users(socket) do
+           {:ok, socket} <- fetch_users(socket),
+           {:ok, socket} <- read_rsa_keys_from_file(socket, @enc_pub_key_path, @enc_priv_key_path, :encryption),
+           {:ok, socket} <- read_rsa_keys_from_file(socket, @sign_pub_key_path, @sign_priv_key_path, :signature),
+           {:ok, socket} <- fetch_group_keys(socket),
+           {:ok, socket} <- fetch_public_keys(socket) do
         {:ok, socket}
       else
         {:redirect, socket} ->
@@ -37,7 +46,10 @@ defmodule TextMessengerClientWeb.HomePage do
 
     with socket <- assign(socket, selected_chat: id, websocket: new_websocket),
          {:ok, socket} <- fetch_messages(socket),
-         {:ok, socket} <- fetch_users(socket) do
+         {:ok, socket} <- fetch_users(socket),
+         {:ok, socket} <- fetch_group_keys(socket),
+         {:ok, socket} <- fetch_public_keys(socket) do
+      IO.inspect(socket)
       {:noreply, socket}
     else
       {:redirect, socket} -> {:noreply, socket}
@@ -88,6 +100,13 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "change_key_request", payload: %{"chat_id" => chat_id}}, socket) do
+    %{user_id: user_id, public_keys: public_keys, signature_private_key: sign_key} = socket.assigns
+    members = Enum.map(public_keys, fn {user_id, keys} ->
+      {user_id, keys.encryption_key}
+    end)
+
+    group_keys = Crypto.generate_group_keys(members, user_id, sign_key, chat_id)
+    TextMessengerClient.SocketClient.send_keys(socket.assigns.websocket, group_keys)
     {:noreply, socket}
   end
 
@@ -422,6 +441,104 @@ defmodule TextMessengerClientWeb.HomePage do
 
   defp fetch_messages(socket) do
     {:ok, socket |> assign(messages: [])}
+  end
+
+  defp fetch_group_keys(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
+    with %GroupKeys{group_keys: keys} <- KeysAPI.fetch_group_keys(token, id) do
+      group_keys =
+        Enum.reduce(keys, %{}, fn %GroupKey{key_number: key_number} = group_key, acc ->
+          Map.put(acc, key_number, group_key)
+        end)
+
+      {:ok, socket |> assign(group_keys: group_keys)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching messages")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_group_keys(socket) do
+    {:ok, socket |> assign(group_keys: [])}
+  end
+
+  defp fetch_public_keys(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
+    with %UserKeysList{user_keys: keys} <- KeysAPI.fetch_members_keys(token, id) do
+      public_keys =
+        keys
+        |> Enum.reduce(%{}, fn %UserKeys{user_id: user_id, encryption_key: enc_key, signature_key: sig_key}, acc ->
+          Map.put(acc, user_id, %{
+            encryption_key: enc_key,
+            signature_key: sig_key
+          })
+        end)
+    {:ok, socket |> assign(public_keys: public_keys)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching messages")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_public_keys(socket) do
+    {:ok, socket |> assign(signature_keys: %{}, encryption_keys: %{})}
+  end
+
+  defp read_rsa_keys_from_file(%{assigns: %{token: token}} = socket, pub_key_path, priv_key_path, :encryption) do
+    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, pub_key_path),
+         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, priv_key_path) do
+      {:ok, socket |> assign(encryption_public_key: public_key, encryption_private_key: private_key)}
+    else
+      {:error, reason} ->
+        IO.inspect("Could not read encryption RSA keys from file #{reason}}. Generating new pair.")
+        {public_key, private_key} = generate_rsa_keys(token, pub_key_path, priv_key_path, :encryption)
+        {:ok, socket |> assign(encryption_public_key: public_key, encryption_private_key: private_key)}
+    end
+  end
+
+  defp read_rsa_keys_from_file(%{assigns: %{token: token}} = socket, pub_key_path, priv_key_path, :signature) do
+    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, pub_key_path),
+         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, priv_key_path) do
+      {:ok, socket |> assign(signature_public_key: public_key, signature_private_key: private_key)}
+    else
+      {:error, reason} ->
+        IO.inspect("Could not read RSA keys from file #{reason}}. Generating new pair.")
+        {public_key, private_key} = generate_rsa_keys(token, pub_key_path, priv_key_path, :signature)
+        {:ok, socket |> assign(signature_public_key: public_key, signature_private_key: private_key)}
+    end
+  end
+
+  defp read_rsa_keys_from_file(socket) do
+    IO.inspect("Incorrect usage of 'read_rsa_keys_from_file'. Program may not behave correctly without loaded RSA keys.")
+    {:ok, socket |> assign(public_key: nil, private_key: nil)}
+  end
+
+  defp generate_rsa_keys(token, pub_key_path, priv_key_path, :encryption) do
+    {public_key, private_key} = Crypto.generate_rsa_keys()
+    with :ok <- Crypto.write_key_to_file(public_key, :RSAPublicKey, pub_key_path),
+         :ok <- Crypto.write_key_to_file(private_key, :RSAPrivateKey, priv_key_path),
+         {:ok, _body} <- KeysAPI.post_encryption_key(token, public_key) do
+      {public_key, private_key}
+    else
+      {:error, reason} ->
+        IO.inspect("Error while writing new RSA key pair to file #{reason}}.")
+    end
+  end
+
+  defp generate_rsa_keys(token, pub_key_path, priv_key_path, :signature) do
+    {public_key, private_key} = Crypto.generate_rsa_keys()
+    with :ok <- Crypto.write_key_to_file(public_key, :RSAPublicKey, pub_key_path),
+         :ok <- Crypto.write_key_to_file(private_key, :RSAPrivateKey, priv_key_path),
+         {:ok, _body} <- KeysAPI.post_signature_key(token, public_key) do
+      {public_key, private_key}
+    else
+      {:error, reason} ->
+        IO.inspect("Error while writing new RSA key pair to file #{reason}}.")
+    end
   end
 
   defp connect_to_websocket(%{assigns: %{token: token}} = socket) do

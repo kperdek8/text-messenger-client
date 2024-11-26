@@ -35,7 +35,7 @@ defmodule TextMessengerClient.KeysAPI do
 
   def fetch_members_keys(token, id) do
     api_url = Application.get_env(:text_messenger_client, :api_url)
-    endpoint_url = "#{api_url}/chats/#{id}/keys"
+    endpoint_url = "#{api_url}/chats/#{id}/users/keys"
 
     with {:ok, body} <- fetch_request(endpoint_url, token) do
       UserKeysList.decode(body)
@@ -43,6 +43,18 @@ defmodule TextMessengerClient.KeysAPI do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  def fetch_group_keys(token, id) do
+    api_url = Application.get_env(:text_messenger_client, :api_url)
+    endpoint_url = "#{api_url}/chats/#{id}/messages/keys"
+
+    with {:ok, body} <- fetch_request(endpoint_url, token) do
+      GroupKeys.decode(body)
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
 
   def fetch_user_keys(token, id) do
     api_url = Application.get_env(:text_messenger_client, :api_url)
