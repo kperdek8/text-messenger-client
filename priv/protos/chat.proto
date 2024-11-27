@@ -27,6 +27,7 @@ message ChatMessage {
   string chat_id = 3;
   string content = 4;
   string timestamp = 5;
+  bytes iv = 6;
 }
 
 message ChatMessages {

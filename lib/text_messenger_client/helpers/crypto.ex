@@ -148,12 +148,12 @@ defmodule TextMessengerClient.Helpers.Crypto do
   - The `private_key` must be in the correct format (e.g., `:RSAPrivateKey`).
   """
   def extract_and_decrypt_group_key(%GroupKey{encrypted_key: encrypted_key}, private_key) do
-    case :public_key.decrypt_private(encrypted_key, private_key, [{:rsa_padding, :rsa_pkcs1_oaep_padding}]) do
-      {:ok, decrypted_key} ->
-        {:ok, decrypted_key}
-
-      {:error, _reason} ->
-        {:error, "Decryption failed"}
+    try do
+      decrypted_key = :public_key.decrypt_private(encrypted_key, private_key, [{:rsa_padding, :rsa_pkcs1_oaep_padding}])
+      {:ok, decrypted_key}
+    rescue
+      exception ->
+        {:error, exception}
     end
   end
 
