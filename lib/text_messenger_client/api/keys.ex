@@ -1,7 +1,7 @@
 defmodule TextMessengerClient.KeysAPI do
   alias HTTPoison
   import TextMessengerClient.RequestHandler
-  alias TextMessengerClient.Protobuf.{GroupKeys, UserKeys, UserKeysList}
+  alias TextMessengerClient.Protobuf.{GroupKeys, GroupKey, UserKeys, UserKeysList}
 
   def post_encryption_key(token, key) do
     base64_key = Base.encode64(key)
@@ -55,6 +55,16 @@ defmodule TextMessengerClient.KeysAPI do
     end
   end
 
+  def fetch_latest_group_key(token, id) do
+    api_url = Application.get_env(:text_messenger_client, :api_url)
+    endpoint_url = "#{api_url}/chats/#{id}/messages/keys/latest"
+
+    with {:ok, body} <- fetch_request(endpoint_url, token) do
+      GroupKey.decode(body)
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   def fetch_user_keys(token, id) do
     api_url = Application.get_env(:text_messenger_client, :api_url)

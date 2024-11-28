@@ -19,15 +19,14 @@ defmodule TextMessengerClientWeb.HomePage do
       with {:ok, socket} <- assign_initial_state(socket, token),
            {:ok, socket} <- extract_logged_in_user_data(socket),
            {:ok, socket} <- connect_to_websocket(socket),
-           {:ok, socket} <- fetch_chats(socket),
-           {:ok, socket} <- open_first_chat(socket),
-           {:ok, socket} <- fetch_messages(socket),
-           {:ok, socket} <- fetch_users(socket),
            {:ok, socket} <- read_rsa_keys_from_file(socket, @enc_pub_key_path, @enc_priv_key_path, :encryption),
            {:ok, socket} <- read_rsa_keys_from_file(socket, @sign_pub_key_path, @sign_priv_key_path, :signature),
+           {:ok, socket} <- fetch_chats(socket),
+           {:ok, socket} <- open_first_chat(socket),
            {:ok, socket} <- fetch_group_keys(socket),
-           {:ok, socket} <- fetch_public_keys(socket) do
-        IO.inspect(socket)
+           {:ok, socket} <- fetch_messages(socket),
+           {:ok, socket} <- fetch_public_keys(socket),
+           {:ok, socket} <- fetch_users(socket) do
         {:ok, socket}
       else
         {:redirect, socket} ->
@@ -40,8 +39,9 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_event("send_message", %{"message" => message}, socket) do
-    iv = <<4, 4, 4, 4>>
-    TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, message, iv)
+    key = socket.assigns.latest_group_key
+    {encrypted_message, iv} = Crypto.encrypt_message(message, key)
+    TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, encrypted_message, iv)
     {:noreply, socket}
   end
 
@@ -49,10 +49,10 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, new_websocket} = TextMessengerClient.SocketClient.change_chat(socket.assigns.websocket, id)
 
     with socket <- assign(socket, selected_chat: id, websocket: new_websocket),
-         {:ok, socket} <- fetch_messages(socket),
-         {:ok, socket} <- fetch_users(socket),
+         {:ok, socket} <- fetch_public_keys(socket),
          {:ok, socket} <- fetch_group_keys(socket),
-         {:ok, socket} <- fetch_public_keys(socket) do
+         {:ok, socket} <- fetch_messages(socket),
+         {:ok, socket} <- fetch_users(socket) do
       {:noreply, socket}
     else
       {:redirect, socket} -> {:noreply, socket}
@@ -97,9 +97,11 @@ defmodule TextMessengerClientWeb.HomePage do
     {:noreply, socket}
   end
 
-  def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => content, "user_id" => user_id, "iv" => encoded_iv}}, socket) do
+  def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => encoded_content, "user_id" => user_id, "iv" => encoded_iv}}, socket) do
     {:ok, iv} = Base.decode64(encoded_iv)
-    socket = assign(socket, messages: [%ChatMessage{id: id, content: content, user_id: user_id, iv: iv} | socket.assigns.messages])
+    {:ok, content} = Base.decode64(encoded_content)
+    {:ok, decrypted_content} = Crypto.decrypt_message(content, iv, socket.assigns.latest_group_key)
+    socket = assign(socket, messages: [%{id: id, content: content, user_id: user_id, iv: iv, decrypted_content: decrypted_content} | socket.assigns.messages])
     {:noreply, socket}
   end
 
@@ -112,6 +114,16 @@ defmodule TextMessengerClientWeb.HomePage do
     group_keys = Crypto.generate_group_keys(members, user_id, sign_key, chat_id)
     TextMessengerClient.SocketClient.send_keys(socket.assigns.websocket, group_keys)
     {:noreply, socket}
+  end
+
+  def handle_info(%PhoenixClient.Message{event: "group_key_changed", payload: _payload}, socket) do
+    case fetch_latest_group_key(socket) do
+      {:ok, socket} -> {:noreply, socket}
+      {:redirect, socket} -> {:noreply, socket}
+      {:error, socket} ->
+        Logger.warning("Something went wrong while fetching latest group key")
+        {:noreply, socket}
+    end
   end
 
   def handle_info(%PhoenixClient.Message{event: "add_user", payload: %{"user_id" => user_id}}, socket) do
@@ -137,8 +149,10 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, socket} = remove_chat(socket, chat_id)
     if socket.assigns.selected_chat == chat_id do
       with {:ok, socket} <- open_first_chat(socket),
-           {:ok, socket} <- fetch_messages(socket),
-           {:ok, socket} <- fetch_users(socket) do
+         {:ok, socket} <- fetch_public_keys(socket),
+         {:ok, socket} <- fetch_group_keys(socket),
+         {:ok, socket} <- fetch_messages(socket),
+         {:ok, socket} <- fetch_users(socket) do
         {:noreply, socket}
       else
         {:redirect, socket} ->
@@ -218,7 +232,7 @@ defmodule TextMessengerClientWeb.HomePage do
       <!-- Chat Window -->
       <div id="chat" class="flex flex-col grow h-full border-gray-700">
         <div id="chat_messages" class="flex flex-col-reverse w-full h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
-          <%= for %ChatMessage{id: id, content: message, user_id: user_id} <- @messages do %>
+          <%= for %{id: id, decrypted_content: message, user_id: user_id} <- @messages, not is_nil(message) do %>
             <.live_component module={TextMessengerClientWeb.ChatMessageComponent} id={id} message={message} user={get_user_name(user_id, @users)} />
           <% end %>
         </div>
@@ -431,9 +445,15 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, socket |> assign(users: updated_users)}
   end
 
-  defp fetch_messages(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
+  defp fetch_messages(%{assigns: %{token: token, selected_chat: id, group_keys: group_keys}} = socket) when not is_nil(token) and not is_nil(id) do
     with %ChatMessages{messages: messages} <- MessagesAPI.fetch_messages(token, id) do
-      {:ok, socket |> assign(messages: messages)}
+      decrypted_messages =
+        Enum.map(messages, fn message ->
+          decrypted_message = decrypt_message(message, group_keys)
+          Map.put(message, :decrypted_content, decrypted_message) # Add decrypted_content to the message struct
+        end)
+
+      {:ok, socket |> assign(messages: decrypted_messages)}
     else
       {:error, "token_expired"} ->
         {:redirect, socket |> redirect(to: "/login")}
@@ -463,26 +483,57 @@ defmodule TextMessengerClientWeb.HomePage do
           end
         end)
 
-    latest_group_key_number =
+    {latest_group_key, latest_group_key_number} =
       keys
-      |> Enum.max_by(& &1.key_number, fn -> nil end) # Fallback to nil if keys are empty
+      |> Enum.max_by(& &1.key_number, fn -> nil end)
       |> case do
-        nil -> nil
-        %GroupKey{key_number: key_number} -> key_number
+        nil -> {nil, nil}
+        %GroupKey{key_number: key_number} = key ->
+          {:ok, decrypted_key} = Crypto.extract_and_decrypt_group_key(key, private_key)
+          {decrypted_key, key_number}
       end
 
-    {:ok, socket |> assign(group_keys: group_keys, latest_group_key_number: latest_group_key_number)}
-  else
-    {:error, "token_expired"} ->
-      {:redirect, socket |> redirect(to: "/login")}
-    _ ->
-      IO.inspect("Unexpected error when fetching messages")
-      {:error, socket}
+    {:ok, socket |> assign(group_keys: group_keys, latest_group_key: latest_group_key, latest_group_key_number: latest_group_key_number)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching group keys")
+        {:error, socket}
+    end
   end
-end
 
   defp fetch_group_keys(socket) do
-    {:ok, socket |> assign(group_keys: [], latest_group_key_number: nil)}
+    {:ok, socket |> assign(group_keys: %{}, latest_group_key: nil, latest_group_key_number: nil)}
+  end
+
+  defp fetch_latest_group_key(%{assigns: %{token: token, selected_chat: id, encryption_private_key: encoded_private_key,
+    group_keys: group_keys, latest_group_key_number: latest_group_key_number}} = socket
+   ) do
+    private_key = Crypto.decode_key(encoded_private_key, :RSAPrivateKey)
+    new_latest_group_key_number =
+      case latest_group_key_number do
+        nil -> 1
+        number -> number + 1
+      end
+
+    with %GroupKey{} = group_key <- KeysAPI.fetch_latest_group_key(token, id) do
+      case Crypto.extract_and_decrypt_group_key(group_key, private_key) do
+        {:ok, decrypted_key} ->
+          updated_group_keys = Map.put(group_keys, Integer.to_string(new_latest_group_key_number), decrypted_key)
+          {:ok, socket |> assign(group_keys: updated_group_keys, latest_group_key: decrypted_key, latest_group_key_number: latest_group_key_number)}
+
+        {:error, _reason} ->
+          Logger.warning("Failed to decrypt latest group key")
+          {:error, socket}
+      end
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching latest group key")
+        {:error, socket}
+    end
   end
 
   defp fetch_public_keys(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
@@ -560,6 +611,27 @@ end
       {:error, reason} ->
         IO.inspect("Error while writing new RSA key pair to file #{reason}}.")
     end
+  end
+
+  # Helper function to find specific group key and use it to decrypt message.
+  defp decrypt_message(%ChatMessage{key_number: key_number, content: content, iv: iv}, group_keys) do
+    case Map.get(group_keys, key_number) do
+      nil ->
+        Logger.warning("No group key for key_number #{key_number}")
+        nil
+
+      key ->
+        case Crypto.decrypt_message(content, iv, key) do
+          {:ok, decrypted_message} -> decrypted_message
+          error ->
+            Logger.warning("Failed to decrypt message with key_number #{key_number} #{inspect(error)}}")
+            nil
+        end
+    end
+  end
+
+  defp decrypt_message(_message, _group_keys) do
+    nil
   end
 
   defp connect_to_websocket(%{assigns: %{token: token}} = socket) do

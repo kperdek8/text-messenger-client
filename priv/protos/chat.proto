@@ -25,9 +25,10 @@ message ChatMessage {
   string id = 1; // UUID stored as string
   string user_id = 2;
   string chat_id = 3;
-  string content = 4;
+  bytes content = 4;
   string timestamp = 5;
   bytes iv = 6;
+  int32 key_number = 7;
 }
 
 message ChatMessages {

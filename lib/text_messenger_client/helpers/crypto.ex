@@ -224,9 +224,10 @@ defmodule TextMessengerClient.Helpers.Crypto do
       raise ArgumentError, "IV must be 16 bytes for AES-256 decryption"
     end
 
-    cipher_text
-    |> :crypto.crypto_one_time(:aes_256_cbc, key, iv, false)
-    |> pkcs7_unpad()
+    message =
+      :crypto.crypto_one_time(:aes_256_cbc, key, iv, cipher_text, false)
+      |> pkcs7_unpad()
+    {:ok, message}
   end
 
   @doc """

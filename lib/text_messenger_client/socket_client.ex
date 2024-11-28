@@ -30,7 +30,8 @@ defmodule TextMessengerClient.SocketClient do
 
   def send_message(%WebSocket{chat_channel: channel}, content, iv) do
     encoded_iv = Base.encode64(iv)
-    payload = %{content: content, iv: encoded_iv}
+    encoded_content = Base.encode64(content)
+    payload = %{content: encoded_content, iv: encoded_iv}
 
     case PhoenixClient.Channel.push_async(channel, "new_message", payload) do
       :ok -> :ok

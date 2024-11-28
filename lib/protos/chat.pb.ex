@@ -41,9 +41,10 @@ defmodule TextMessengerClient.Protobuf.ChatMessage do
   field :id, 1, type: :string
   field :user_id, 2, type: :string, json_name: "userId"
   field :chat_id, 3, type: :string, json_name: "chatId"
-  field :content, 4, type: :string
+  field :content, 4, type: :bytes
   field :timestamp, 5, type: :string
   field :iv, 6, type: :bytes
+  field :key_number, 7, type: :int32, json_name: "keyNumber"
 end
 
 defmodule TextMessengerClient.Protobuf.ChatMessages do
