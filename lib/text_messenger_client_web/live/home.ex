@@ -41,8 +41,19 @@ defmodule TextMessengerClientWeb.HomePage do
   def handle_event("send_message", %{"message" => message}, socket) do
     key = socket.assigns.latest_group_key
     {encrypted_message, iv} = Crypto.encrypt_message(message, key)
-    TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, encrypted_message, iv)
-    {:noreply, socket}
+    case TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, encrypted_message, iv) do
+      :ok -> {:noreply, socket |> assign(key_changed: false, message_input: "")}
+      {:change_key, chat_id} ->
+        send_new_group_key(socket, chat_id)
+        {:noreply, socket |> assign(key_changed: true)}
+      {:error, reason} ->
+        Logger.warning("Error while sending message #{reason}}")
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("update_message_input", %{"message" => message}, socket) do
+    {:noreply, assign(socket, :message_input, message)}
   end
 
   def handle_event("select_chat", %{"id" => id}, socket) do
@@ -83,7 +94,12 @@ defmodule TextMessengerClientWeb.HomePage do
       {:noreply, assign(socket, form_error: "User UUID cannot be empty")}
     else
       TextMessengerClient.SocketClient.add_user(socket.assigns.websocket, user_id)
-      {:noreply, assign(socket, show_add_user_modal: false, form_error: nil)}
+      case add_user(socket, user_id) do
+        {:ok, socket} ->
+          send_new_group_key(socket, socket.assigns.selected_chat)
+          {:noreply, socket |> assign(show_add_user_modal: false, form_error: nil)}
+        {:redirect, socket} -> {:noreply, socket}
+      end
     end
   end
 
@@ -94,10 +110,13 @@ defmodule TextMessengerClientWeb.HomePage do
 
   def handle_info({:kick_user, user_id}, socket) do
     TextMessengerClient.SocketClient.kick_user(socket.assigns.websocket, user_id)
+    {:ok, socket} = remove_user(socket, user_id)
+    send_new_group_key(socket, socket.assigns.selected_chat)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => encoded_content, "user_id" => user_id, "iv" => encoded_iv}}, socket) do
+    Logger.debug("Received `new_message` message from server")
     {:ok, iv} = Base.decode64(encoded_iv)
     {:ok, content} = Base.decode64(encoded_content)
     {:ok, decrypted_content} = Crypto.decrypt_message(content, iv, socket.assigns.latest_group_key)
@@ -106,17 +125,13 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "change_key_request", payload: %{"chat_id" => chat_id}}, socket) do
-    %{user_id: user_id, public_keys: public_keys, signature_private_key: sign_key} = socket.assigns
-    members = Enum.map(public_keys, fn {user_id, keys} ->
-      {user_id, keys.encryption_key}
-    end)
-
-    group_keys = Crypto.generate_group_keys(members, user_id, sign_key, chat_id)
-    TextMessengerClient.SocketClient.send_keys(socket.assigns.websocket, group_keys)
+    Logger.debug("Received `change_key_request` message from server")
+    send_new_group_key(socket, chat_id)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "group_key_changed", payload: _payload}, socket) do
+    Logger.debug("Received `group_key_changed` message from server")
     case fetch_latest_group_key(socket) do
       {:ok, socket} -> {:noreply, socket}
       {:redirect, socket} -> {:noreply, socket}
@@ -127,18 +142,21 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "add_user", payload: %{"user_id" => user_id}}, socket) do
-    case fetch_user(socket, user_id) do
-      {:ok, socket} -> {:noreply, socket}
-      {:redirect, socket} -> {:noreply, socket}
-    end
+    Logger.debug("Received `add_user` message from server")
+      case add_user(socket, user_id) do
+        {:ok, socket} -> {:noreply, socket}
+        {:redirect, socket} -> {:noreply, socket}
+      end
   end
 
   def handle_info(%PhoenixClient.Message{event: "kick_user", payload: %{"user_id" => user_id}}, socket) do
+    Logger.debug("Received `kick_user` message from server")
     {:ok, socket} = remove_user(socket, user_id)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "added_to_chat", payload: %{"chat_id" => chat_id}}, socket) do
+    Logger.debug("Received `added_to_chat` message from server")
     case fetch_chat(socket, chat_id) do
       {:ok, socket} -> {:noreply, socket}
       {:redirect, socket} -> {:noreply, socket}
@@ -146,6 +164,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "removed_from_chat", payload: %{"chat_id" => chat_id}}, socket) do
+    Logger.debug("Received `removed_from_chat` message from server")
     {:ok, socket} = remove_chat(socket, chat_id)
     if socket.assigns.selected_chat == chat_id do
       with {:ok, socket} <- open_first_chat(socket),
@@ -176,7 +195,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{} = message, socket) do
-    IO.inspect(message, label: "Unsupported socket message")
+    Logger.warning("Unsupported socket message #{inspect(message)}")
     {:noreply, socket}
   end
 
@@ -238,23 +257,32 @@ defmodule TextMessengerClientWeb.HomePage do
         </div>
 
         <!-- Message Input Box -->
-        <div id="inputbox" class="flex p-2">
-          <form phx-submit="send_message" class="flex w-full">
-            <input
-              name="message"
-              type="text"
-              placeholder={"#{if @selected_chat, do: "Type your message...", else: "Join or create chat to send messages"}"}
-              class={"flex-1 p-2 border rounded-lg focus:outline-none #{if @selected_chat, do: "bg-gray-800 text-gray-200", else: "bg-gray-700 text-gray-500 cursor-not-allowed"}"}
-              disabled={@selected_chat == nil}
-            />
-            <button
-              type="submit"
-              class={"ml-2 p-2 rounded-lg text-white #{if @selected_chat, do: "bg-blue-500", else: "bg-gray-500 cursor-not-allowed"}"}
-              disabled={@selected_chat == nil}
-            >
-              Send
-            </button>
-          </form>
+        <div class="flex flex-col">
+          <%= if @key_changed do %>
+            <div class="p-2 mt-2 bg-yellow-300 text-gray-800 text-center rounded-lg border border-yellow-400">
+              <p class="font-semibold">Group key has changed in meantime. Please resend your message.</p>
+            </div>
+          <% end %>
+          <div id="inputbox" class="flex py-2">
+            <form phx-submit="send_message" class="flex w-full">
+              <input
+                name="message"
+                type="text"
+                value={@message_input || ""}
+                placeholder={"#{if @selected_chat, do: "Type your message...", else: "Join or create chat to send messages"}"}
+                class={"flex-1 p-2 border rounded-lg focus:outline-none #{if @selected_chat, do: "bg-gray-800 text-gray-200", else: "bg-gray-700 text-gray-500 cursor-not-allowed"}"}
+                disabled={@selected_chat == nil}
+                phx-change="update_message_input"
+              />
+              <button
+                type="submit"
+                class={"ml-2 p-2 rounded-lg text-white #{if @selected_chat, do: "bg-blue-500", else: "bg-gray-500 cursor-not-allowed"}"}
+                disabled={@selected_chat == nil}
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       </div>
 
@@ -341,7 +369,7 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok,
      socket
        |> assign(token: token)
-       |> assign(show_create_chat_modal: false, show_add_user_modal: false, form_error: nil)}
+       |> assign(show_create_chat_modal: false, show_add_user_modal: false, form_error: nil, key_changed: false, message_input: "")}
   end
 
   defp fetch_chat(%{assigns: %{token: token, chats: chats}} = socket, id) when not is_nil(token) do
@@ -437,12 +465,25 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, socket |> assign(users: [])}
   end
 
-  defp remove_user(%{assigns: %{users: users}} = socket, id) do
+  defp add_user(socket, user_id) do
+    with {:ok, socket} <- fetch_user(socket, user_id),
+         {:ok, socket} <- fetch_user_keys(socket, user_id) do
+      {:ok, socket}
+    else
+      {:redirect, socket} -> {:noreply, socket}
+    end
+  end
+
+  defp remove_user(%{assigns: %{users: users, public_keys: public_keys}} = socket, id) do
     updated_users =
       users
       |> Enum.reject(fn user -> user.id == id end)
 
-    {:ok, socket |> assign(users: updated_users)}
+    updated_public_keys =
+      public_keys
+      |> Map.drop([id])
+
+    {:ok, socket |> assign(users: updated_users, public_keys: updated_public_keys)}
   end
 
   defp fetch_messages(%{assigns: %{token: token, selected_chat: id, group_keys: group_keys}} = socket) when not is_nil(token) and not is_nil(id) do
@@ -478,7 +519,7 @@ defmodule TextMessengerClientWeb.HomePage do
               Map.put(acc, key_number, decrypted_key)
 
             {:error, _reason} ->
-              Logger.warning("Failed to decrypt group key number #{key_number}}")
+              Logger.warning("Failed to decrypt group key number #{key_number}")
               acc
           end
         end)
@@ -489,8 +530,14 @@ defmodule TextMessengerClientWeb.HomePage do
       |> case do
         nil -> {nil, nil}
         %GroupKey{key_number: key_number} = key ->
-          {:ok, decrypted_key} = Crypto.extract_and_decrypt_group_key(key, private_key)
-          {decrypted_key, key_number}
+          case Crypto.extract_and_decrypt_group_key(key, private_key) do
+            {:ok, decrypted_key} ->
+              {decrypted_key, key_number}
+
+            {:error, _reason} ->
+              Logger.warning("Failed to decrypt latest group key number #{key_number}")
+              {nil, nil}
+          end
       end
 
     {:ok, socket |> assign(group_keys: group_keys, latest_group_key: latest_group_key, latest_group_key_number: latest_group_key_number)}
@@ -531,9 +578,26 @@ defmodule TextMessengerClientWeb.HomePage do
       {:error, "token_expired"} ->
         {:redirect, socket |> redirect(to: "/login")}
       _ ->
-        IO.inspect("Unexpected error when fetching latest group key")
+        Logger.error("Unexpected error when fetching latest group key")
         {:error, socket}
     end
+  end
+
+  defp fetch_user_keys(%{assigns: %{token: token, public_keys: keys}} = socket, user_id) when not is_nil(token) and not is_nil(user_id) do
+    with %UserKeys{encryption_key: enc_key, signature_key: sig_key} <- KeysAPI.fetch_user_keys(token, user_id) do
+      public_keys = Map.put(keys, user_id, %{encryption_key: enc_key, signature_key: sig_key})
+    {:ok, socket |> assign(public_keys: public_keys)}
+    else
+      {:error, "token_expired"} ->
+        {:redirect, socket |> redirect(to: "/login")}
+      _ ->
+        IO.inspect("Unexpected error when fetching user keys")
+        {:error, socket}
+    end
+  end
+
+  defp fetch_user_keys(socket, _user_id) do
+    {:ok, socket}
   end
 
   defp fetch_public_keys(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
@@ -551,7 +615,7 @@ defmodule TextMessengerClientWeb.HomePage do
       {:error, "token_expired"} ->
         {:redirect, socket |> redirect(to: "/login")}
       _ ->
-        IO.inspect("Unexpected error when fetching messages")
+        IO.inspect("Unexpected error when fetching public keys")
         {:error, socket}
     end
   end
@@ -560,26 +624,42 @@ defmodule TextMessengerClientWeb.HomePage do
     {:ok, socket |> assign(signature_keys: %{}, encryption_keys: %{})}
   end
 
+  defp send_new_group_key(socket, chat_id) do
+    %{user_id: user_id, public_keys: public_keys, signature_private_key: sign_key} = socket.assigns
+    members = Enum.map(public_keys, fn {user_id, keys} ->
+      {user_id, keys.encryption_key}
+    end)
+
+    group_keys = Crypto.generate_group_keys(members, user_id, sign_key, chat_id)
+    TextMessengerClient.SocketClient.send_keys(socket.assigns.websocket, group_keys)
+  end
+
   defp read_rsa_keys_from_file(%{assigns: %{token: token}} = socket, pub_key_path, priv_key_path, :encryption) do
-    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, pub_key_path),
-         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, priv_key_path) do
+    user_pub_key_path = "#{socket.assigns.username}_#{pub_key_path}"
+    user_priv_key_path = "#{socket.assigns.username}_#{priv_key_path}"
+
+    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, user_pub_key_path),
+         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, user_priv_key_path) do
       {:ok, socket |> assign(encryption_public_key: public_key, encryption_private_key: private_key)}
     else
       {:error, reason} ->
-        IO.inspect("Could not read encryption RSA keys from file #{reason}}. Generating new pair.")
-        {public_key, private_key} = generate_rsa_keys(token, pub_key_path, priv_key_path, :encryption)
+        IO.inspect("Could not read encryption RSA keys from file: #{reason}. Generating new pair.")
+        {public_key, private_key} = generate_rsa_keys(token, user_pub_key_path, user_priv_key_path, :encryption)
         {:ok, socket |> assign(encryption_public_key: public_key, encryption_private_key: private_key)}
     end
   end
 
   defp read_rsa_keys_from_file(%{assigns: %{token: token}} = socket, pub_key_path, priv_key_path, :signature) do
-    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, pub_key_path),
-         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, priv_key_path) do
+    user_pub_key_path = "#{socket.assigns.username}_#{pub_key_path}"
+    user_priv_key_path = "#{socket.assigns.username}_#{priv_key_path}"
+
+    with {:ok, public_key} <- Crypto.read_key_from_file(:RSAPublicKey, user_pub_key_path),
+         {:ok, private_key} <- Crypto.read_key_from_file(:RSAPrivateKey, user_priv_key_path) do
       {:ok, socket |> assign(signature_public_key: public_key, signature_private_key: private_key)}
     else
       {:error, reason} ->
-        IO.inspect("Could not read RSA keys from file #{reason}}. Generating new pair.")
-        {public_key, private_key} = generate_rsa_keys(token, pub_key_path, priv_key_path, :signature)
+        IO.inspect("Could not read RSA keys from file: #{reason}. Generating new pair.")
+        {public_key, private_key} = generate_rsa_keys(token, user_pub_key_path, user_priv_key_path, :signature)
         {:ok, socket |> assign(signature_public_key: public_key, signature_private_key: private_key)}
     end
   end
