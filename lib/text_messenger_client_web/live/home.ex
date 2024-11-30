@@ -99,6 +99,7 @@ defmodule TextMessengerClientWeb.HomePage do
           send_new_group_key(socket, socket.assigns.selected_chat)
           {:noreply, socket |> assign(show_add_user_modal: false, form_error: nil)}
         {:redirect, socket} -> {:noreply, socket}
+        {:error, error} -> {:noreply, socket |> assign(form_error: error)}
       end
     end
   end
@@ -439,8 +440,10 @@ defmodule TextMessengerClientWeb.HomePage do
     else
       {:error, "token_expired"} ->
         {:redirect, socket |> redirect(to: "/login")}
-      _ ->
-        IO.inspect("Unexpected error when fetching chats")
+      {:error, 400} -> {:error, "Incorrect UUID"}
+      {:error, 404} -> {:error, "User not found"}
+      error ->
+        IO.inspect("Unexpected error when fetching user: #{error}")
         {:error, socket}
     end
   end
@@ -466,11 +469,16 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp add_user(socket, user_id) do
-    with {:ok, socket} <- fetch_user(socket, user_id),
-         {:ok, socket} <- fetch_user_keys(socket, user_id) do
-      {:ok, socket}
+    if Enum.any?(socket.assigns.users, fn user -> user.id == user_id end) do
+      {:error, "User already in chat"}
     else
-      {:redirect, socket} -> {:noreply, socket}
+      with {:ok, socket} <- fetch_user(socket, user_id),
+           {:ok, socket} <- fetch_user_keys(socket, user_id) do
+        {:ok, socket}
+      else
+        {:redirect, socket} -> {:noreply, socket}
+        {:error, error} -> {:error, error}
+      end
     end
   end
 

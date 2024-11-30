@@ -28,7 +28,7 @@ defmodule TextMessengerClient.RequestHandler do
         end
 
       {:ok, %HTTPoison.Response{status_code: status_code}} ->
-        {:error, "Error: #{status_code}"}
+        {:error, status_code}
 
       {:error, %HTTPoison.Error{reason: reason}} ->
         {:error, "HTTP error: #{reason}"}
