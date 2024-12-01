@@ -16,7 +16,8 @@ defmodule TextMessengerClient.Application do
       # Start a worker by calling: TextMessengerClient.Worker.start_link(arg)
       # {TextMessengerClient.Worker, arg},
       # Start to serve requests, typically the last entry
-      TextMessengerClientWeb.Endpoint
+      TextMessengerClientWeb.Endpoint,
+      TextMessengerClient.Cache
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

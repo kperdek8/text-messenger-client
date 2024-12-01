@@ -28,7 +28,8 @@ message ChatMessage {
   bytes content = 4;
   string timestamp = 5;
   bytes iv = 6;
-  int32 key_number = 7;
+  bytes tag = 7;
+  int32 key_number = 8;
 }
 
 message ChatMessages {

@@ -180,54 +180,61 @@ defmodule TextMessengerClient.Helpers.Crypto do
   end
 
   @doc """
-  Encrypts a given plaintext message using AES-256-CBC with the provided symmetric key.
+  Encrypts a given plaintext message using AES-256-GCM with the provided symmetric key.
 
   ## Parameters
     - `message`: The plaintext message to encrypt.
     - `key`: The symmetric key used for encryption (binary, 32 bytes).
+    - `aad`: Additional authenticated data (AAD) to include in encryption (optional, defaults to empty binary).
 
   ## Returns
-    - `{cipher_text, iv}`: A tuple containing the encrypted message and the initialization vector (IV).
+    - `{cipher_text, iv, tag}`: A tuple containing the encrypted message, initialization vector (IV), and authentication tag.
   """
-  def encrypt_message(message, key) do
+  def encrypt_message(message, key, aad \\ <<>>) do
     if byte_size(key) != 32 do
       raise ArgumentError, "Key must be 32 bytes for AES-256 encryption"
     end
 
-    iv = :crypto.strong_rand_bytes(16)
-    padded_message = pkcs7_pad(message)
-    cipher_text = :crypto.crypto_one_time(:aes_256_cbc, key, iv, padded_message, true)
+    iv = :crypto.strong_rand_bytes(12) # AES-GCM typically uses a 12-byte IV
+    {cipher_text, tag} =
+      :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, message, aad, 16, true)
 
-    {cipher_text, iv}
+    {cipher_text, iv, tag}
   end
 
   @doc """
-  Decrypts a given ciphertext using AES-256-CBC with the provided symmetric key and IV.
+  Decrypts a given ciphertext using AES-256-GCM with the provided symmetric key, IV, and authentication tag.
 
   ## Parameters
     - `cipher_text`: The encrypted message to decrypt (binary).
-    - `iv`: The initialization vector used for decryption (binary, 16 bytes).
+    - `iv`: The initialization vector used for decryption (binary, 12 bytes).
     - `key`: The symmetric key used for decryption (binary, 32 bytes).
+    - `tag`: The authentication tag for verification (binary, 16 bytes).
+    - `aad`: Additional authenticated data (AAD) used during encryption (optional, defaults to empty binary).
 
   ## Returns
-    - `message`: The decrypted plaintext message (binary).
+    - `{:ok, message}`: The decrypted plaintext message (binary) if successful.
+    - `{:error, :decryption_failed}`: If decryption or authentication fails.
 
   ## Raises
     - `ArgumentError` if the key or IV size is invalid.
   """
-  def decrypt_message(cipher_text, iv, key) do
+  def decrypt_message(cipher_text, iv, key, tag, aad \\ <<>>) do
     if byte_size(key) != 32 do
       raise ArgumentError, "Key must be 32 bytes for AES-256 decryption"
     end
 
-    if byte_size(iv) != 16 do
-      raise ArgumentError, "IV must be 16 bytes for AES-256 decryption"
+    if byte_size(iv) != 12 do
+      raise ArgumentError, "IV must be 12 bytes for AES-256 decryption"
     end
 
-    message =
-      :crypto.crypto_one_time(:aes_256_cbc, key, iv, cipher_text, false)
-      |> pkcs7_unpad()
-    {:ok, message}
+    case :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, cipher_text, aad, tag, false) do
+      decrypted_message when is_binary(decrypted_message) ->
+        {:ok, decrypted_message}
+
+      _error ->
+        {:error, :decryption_failed}
+    end
   end
 
   @doc """
@@ -276,10 +283,7 @@ defmodule TextMessengerClient.Helpers.Crypto do
       {:error, "Failed to decode key from DER data"}
   """
   def decode_key(key, type) do
-    case :public_key.der_decode(type, key) do
-      key -> key
-      _ -> {:error, "Failed to decode key from DER data"}
-    end
+    :public_key.der_decode(type, key)
   end
 
   # Private functions

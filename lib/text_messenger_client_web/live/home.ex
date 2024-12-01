@@ -3,6 +3,7 @@ defmodule TextMessengerClientWeb.HomePage do
   alias TextMessengerClient.{ChatsAPI, MessagesAPI, UsersAPI, KeysAPI}
   alias TextMessengerClient.Protobuf.{ChatMessage, ChatMessages, User, Users, Chat, Chats, GroupKeys, GroupKey, UserKeysList, UserKeys}
   alias TextMessengerClient.Helpers.{JWT, Crypto}
+  alias TextMessengerClient.Cache
 
   require Logger
 
@@ -40,8 +41,8 @@ defmodule TextMessengerClientWeb.HomePage do
 
   def handle_event("send_message", %{"message" => message}, socket) do
     key = socket.assigns.latest_group_key
-    {encrypted_message, iv} = Crypto.encrypt_message(message, key)
-    case TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, encrypted_message, iv) do
+    {encrypted_message, iv, tag} = Crypto.encrypt_message(message, key)
+    case TextMessengerClient.SocketClient.send_message(socket.assigns.websocket, encrypted_message, iv, tag) do
       :ok -> {:noreply, socket |> assign(key_changed: false, message_input: "")}
       {:change_key, chat_id} ->
         send_new_group_key(socket, chat_id)
@@ -116,11 +117,12 @@ defmodule TextMessengerClientWeb.HomePage do
     {:noreply, socket}
   end
 
-  def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => encoded_content, "user_id" => user_id, "iv" => encoded_iv}}, socket) do
+  def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => encoded_content, "user_id" => user_id, "iv" => encoded_iv, "tag" => encoded_tag}}, socket) do
     Logger.debug("Received `new_message` message from server")
+    {:ok, tag} = Base.decode64(encoded_tag)
     {:ok, iv} = Base.decode64(encoded_iv)
     {:ok, content} = Base.decode64(encoded_content)
-    {:ok, decrypted_content} = Crypto.decrypt_message(content, iv, socket.assigns.latest_group_key)
+    {:ok, decrypted_content} = Crypto.decrypt_message(content, iv, socket.assigns.latest_group_key, tag)
     socket = assign(socket, messages: [%{id: id, content: content, user_id: user_id, iv: iv, decrypted_content: decrypted_content} | socket.assigns.messages])
     {:noreply, socket}
   end
@@ -200,11 +202,9 @@ defmodule TextMessengerClientWeb.HomePage do
     {:noreply, socket}
   end
 
-  defp get_user_name(user_id, users) do
-    case Enum.find(users, fn user -> user.id == user_id end) do
-      %User{name: name} -> name
-      nil -> "Unknown" # TODO: Replace with API call to fetch username
-    end
+  defp get_user_name(user_id, token) do
+    {:ok, username} = Cache.get_username(user_id, token)
+    username
   end
 
   def render(assigns) do
@@ -253,7 +253,7 @@ defmodule TextMessengerClientWeb.HomePage do
       <div id="chat" class="flex flex-col grow h-full border-gray-700">
         <div id="chat_messages" class="flex flex-col-reverse w-full h-full overflow-y-auto bg-gray-900 p-2 rounded-lg">
           <%= for %{id: id, decrypted_content: message, user_id: user_id} <- @messages, not is_nil(message) do %>
-            <.live_component module={TextMessengerClientWeb.ChatMessageComponent} id={id} message={message} user={get_user_name(user_id, @users)} />
+            <.live_component module={TextMessengerClientWeb.ChatMessageComponent} id={id} message={message} user={get_user_name(user_id, @token)} />
           <% end %>
         </div>
 
@@ -435,7 +435,8 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   defp fetch_user(%{assigns: %{token: token, users: users}} = socket, id) when not is_nil(token) do
-    with %User{} = user <- UsersAPI.fetch_user(token, id) do
+    with %User{name: username} = user <- UsersAPI.fetch_user(token, id) do
+      Cache.put_username(id, username)
       {:ok, socket |> assign(users: [user | users])}
     else
       {:error, "token_expired"} ->
@@ -454,6 +455,9 @@ defmodule TextMessengerClientWeb.HomePage do
 
   defp fetch_users(%{assigns: %{token: token, selected_chat: id}} = socket) when not is_nil(token) and not is_nil(id) do
     with %Users{users: users} <- UsersAPI.fetch_chat_members(token, id) do
+      Enum.each(users, fn user ->
+        Cache.put_username(user.id, user.name)
+      end)
       {:ok, socket |> assign(users: users)}
     else
       {:error, "token_expired"} ->
@@ -702,16 +706,16 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   # Helper function to find specific group key and use it to decrypt message.
-  defp decrypt_message(%ChatMessage{key_number: key_number, content: content, iv: iv}, group_keys) do
+  defp decrypt_message(%ChatMessage{key_number: key_number, content: content, iv: iv, tag: tag}, group_keys) do
     case Map.get(group_keys, key_number) do
       nil ->
         Logger.warning("No group key for key_number #{key_number}")
         nil
 
       key ->
-        case Crypto.decrypt_message(content, iv, key) do
+        case Crypto.decrypt_message(content, iv, key, tag) do
           {:ok, decrypted_message} -> decrypted_message
-          error ->
+          {:error, error} ->
             Logger.warning("Failed to decrypt message with key_number #{key_number} #{inspect(error)}}")
             nil
         end

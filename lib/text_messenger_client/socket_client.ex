@@ -28,11 +28,12 @@ defmodule TextMessengerClient.SocketClient do
     {:ok, %WebSocket{socket: socket, chat_channel: nil, notif_channel: notif_channel, token: token, chat_id: nil}}
   end
 
-  def send_message(%WebSocket{chat_channel: channel, chat_id: chat_id}, content, iv) do
+  def send_message(%WebSocket{chat_channel: channel, chat_id: chat_id}, content, iv, tag) do
     Logger.debug("Sending message to server")
     encoded_iv = Base.encode64(iv)
     encoded_content = Base.encode64(content)
-    payload = %{content: encoded_content, iv: encoded_iv}
+    encoded_tag = Base.encode64(tag)
+    payload = %{content: encoded_content, iv: encoded_iv, tag: encoded_tag}
 
     case PhoenixClient.Channel.push(channel, "new_message", payload) do
       {:ok, _message} -> :ok
