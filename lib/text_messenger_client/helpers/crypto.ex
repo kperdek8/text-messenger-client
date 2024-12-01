@@ -162,7 +162,7 @@ defmodule TextMessengerClient.Helpers.Crypto do
 
   ## Parameters:
     - `group_key`: A `GroupKey` struct containing the `encrypted_key` and `signature` fields.
-    - `public_key`: The public key of the creator used to verify the signature.
+    - `public_key`: The public key, encoded using DER format, of the creator used to verify the signature.
 
   ## Returns:
     - `{:ok, encrypted_key}` if the signature is valid.
@@ -173,9 +173,10 @@ defmodule TextMessengerClient.Helpers.Crypto do
       but does not guarantee the integrity of the full protobuf struct.
   """
   def verify_group_key(%GroupKey{encrypted_key: encrypted_key, signature: signature}, public_key) do
-    case :public_key.verify(encrypted_key, :sha256, signature, public_key, [{:rsa_padding, :rsa_pkcs1_pss_padding}]) do
+    decoded_public_key = decode_key(public_key, :RSAPublicKey)
+    case :public_key.verify(encrypted_key, :sha256, signature, decoded_public_key, [{:rsa_padding, :rsa_pkcs1_pss_padding}]) do
       true -> {:ok, encrypted_key}
-      false -> {:error, "Signature verification failed"}
+      false -> {:error, :invalid_signature}
     end
   end
 

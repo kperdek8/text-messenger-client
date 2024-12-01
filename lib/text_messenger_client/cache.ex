@@ -25,16 +25,16 @@ defmodule TextMessengerClient.Cache do
     GenServer.cast(__MODULE__, {:put_username, user_id, username})
   end
 
-  def put_public_key(user_id, encryption_key, signature_key) do
-    GenServer.cast(__MODULE__, {:put_public_key, user_id, encryption_key, signature_key})
+  def put_public_keys(user_id, encryption_key, signature_key) do
+    GenServer.cast(__MODULE__, {:put_public_keys, user_id, encryption_key, signature_key})
   end
 
   def get_username(user_id, token) do
     GenServer.call(__MODULE__, {:get_username, user_id, token})
   end
 
-  def get_public_key(user_id, token) do
-    GenServer.call(__MODULE__, {:get_public_key, user_id, token})
+  def get_public_keys(user_id, token) do
+    GenServer.call(__MODULE__, {:get_public_keys, user_id, token})
   end
 
   # GenServer callbacks
@@ -44,7 +44,7 @@ defmodule TextMessengerClient.Cache do
     {:noreply, state}
   end
 
-  def handle_cast({:put_public_key, user_id, encryption_key, signature_key}, state) do
+  def handle_cast({:put_public_keys, user_id, encryption_key, signature_key}, state) do
     :ets.insert(@public_key_cache_table, {user_id, {encryption_key, signature_key}})
     {:noreply, state}
   end
@@ -66,7 +66,7 @@ defmodule TextMessengerClient.Cache do
     end
   end
 
-  def handle_call({:get_public_key, user_id, token}, _from, state) do
+  def handle_call({:get_public_keys, user_id, token}, _from, state) do
     case :ets.lookup(@public_key_cache_table, user_id) do
       [{_user_id, {encryption_key, signature_key}}] ->
         {:reply, {:ok, {encryption_key, signature_key}}, state}
@@ -74,11 +74,11 @@ defmodule TextMessengerClient.Cache do
       [] ->
         case KeysAPI.fetch_user_keys(token, user_id) do
           %UserKeys{encryption_key: encryption_key, signature_key: signature_key} ->
-            put_public_key(user_id, encryption_key, signature_key)
+            put_public_keys(user_id, encryption_key, signature_key)
             {:reply, {:ok, {encryption_key, signature_key}}, state}
 
           {:error, _reason} ->
-            {:reply, {:ok, {<<0>>, <<0>>}}, state}
+            {:reply, {:error, :not_found}, state}
         end
     end
   end

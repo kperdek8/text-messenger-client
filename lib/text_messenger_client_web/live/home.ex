@@ -525,11 +525,18 @@ defmodule TextMessengerClientWeb.HomePage do
     private_key = Crypto.decode_key(encoded_private_key, :RSAPrivateKey)
     with %GroupKeys{group_keys: keys} <- KeysAPI.fetch_group_keys(token, id) do
       group_keys =
-        Enum.reduce(keys, %{}, fn %GroupKey{key_number: key_number} = group_key, acc ->
-          case Crypto.extract_and_decrypt_group_key(group_key, private_key) do
-            {:ok, decrypted_key} ->
+        Enum.reduce(keys, %{}, fn %GroupKey{creator_id: creator_id, key_number: key_number} = group_key, acc ->
+          with {:ok, {_, signature_key}} <- Cache.get_public_keys(creator_id, token),
+               {:ok, _key} <- Crypto.verify_group_key(group_key, signature_key),
+               {:ok, decrypted_key} <- Crypto.extract_and_decrypt_group_key(group_key, private_key) do
               Map.put(acc, key_number, decrypted_key)
-
+          else
+            {:error, :not_found} ->
+              Logger.warning("Could not fetch public key of key number #{key_number} creator")
+              acc
+            {:error, :invalid_signature} ->
+              Logger.warning("Could not verify signature of group key number #{key_number}")
+              acc
             {:error, _reason} ->
               Logger.warning("Failed to decrypt group key number #{key_number}")
               acc
@@ -597,6 +604,7 @@ defmodule TextMessengerClientWeb.HomePage do
 
   defp fetch_user_keys(%{assigns: %{token: token, public_keys: keys}} = socket, user_id) when not is_nil(token) and not is_nil(user_id) do
     with %UserKeys{encryption_key: enc_key, signature_key: sig_key} <- KeysAPI.fetch_user_keys(token, user_id) do
+      Cache.put_public_keys(user_id, enc_key, sig_key)
       public_keys = Map.put(keys, user_id, %{encryption_key: enc_key, signature_key: sig_key})
     {:ok, socket |> assign(public_keys: public_keys)}
     else
@@ -617,6 +625,7 @@ defmodule TextMessengerClientWeb.HomePage do
       public_keys =
         keys
         |> Enum.reduce(%{}, fn %UserKeys{user_id: user_id, encryption_key: enc_key, signature_key: sig_key}, acc ->
+          Cache.put_public_keys(user_id, enc_key, sig_key)
           Map.put(acc, user_id, %{
             encryption_key: enc_key,
             signature_key: sig_key
@@ -709,7 +718,7 @@ defmodule TextMessengerClientWeb.HomePage do
   defp decrypt_message(%ChatMessage{key_number: key_number, content: content, iv: iv, tag: tag}, group_keys) do
     case Map.get(group_keys, key_number) do
       nil ->
-        Logger.warning("No group key for key_number #{key_number}")
+        Logger.warning("Failed to decrypt message. No group key number #{key_number}")
         nil
 
       key ->
