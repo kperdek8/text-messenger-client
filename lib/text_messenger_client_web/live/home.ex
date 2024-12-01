@@ -525,21 +525,10 @@ defmodule TextMessengerClientWeb.HomePage do
     private_key = Crypto.decode_key(encoded_private_key, :RSAPrivateKey)
     with %GroupKeys{group_keys: keys} <- KeysAPI.fetch_group_keys(token, id) do
       group_keys =
-        Enum.reduce(keys, %{}, fn %GroupKey{creator_id: creator_id, key_number: key_number} = group_key, acc ->
-          with {:ok, {_, signature_key}} <- Cache.get_public_keys(creator_id, token),
-               {:ok, _key} <- Crypto.verify_group_key(group_key, signature_key),
-               {:ok, decrypted_key} <- Crypto.extract_and_decrypt_group_key(group_key, private_key) do
-              Map.put(acc, key_number, decrypted_key)
-          else
-            {:error, :not_found} ->
-              Logger.warning("Could not fetch public key of key number #{key_number} creator")
-              acc
-            {:error, :invalid_signature} ->
-              Logger.warning("Could not verify signature of group key number #{key_number}")
-              acc
-            {:error, _reason} ->
-              Logger.warning("Failed to decrypt group key number #{key_number}")
-              acc
+        Enum.reduce(keys, %{}, fn %GroupKey{} = group_key, acc ->
+          case process_group_key(group_key, private_key, token) do
+            {:ok, decrypted_key} -> Map.put(acc, group_key.key_number, decrypted_key)
+            _ -> acc
           end
         end)
 
@@ -549,12 +538,12 @@ defmodule TextMessengerClientWeb.HomePage do
       |> case do
         nil -> {nil, nil}
         %GroupKey{key_number: key_number} = key ->
-          case Crypto.extract_and_decrypt_group_key(key, private_key) do
+          case process_group_key(key, private_key, token) do
             {:ok, decrypted_key} ->
               {decrypted_key, key_number}
 
-            {:error, _reason} ->
-              Logger.warning("Failed to decrypt latest group key number #{key_number}")
+            _ ->
+              Logger.warning("Error occurred when processing latest group key (number #{key_number})")
               {nil, nil}
           end
       end
@@ -571,6 +560,24 @@ defmodule TextMessengerClientWeb.HomePage do
 
   defp fetch_group_keys(socket) do
     {:ok, socket |> assign(group_keys: %{}, latest_group_key: nil, latest_group_key_number: nil)}
+  end
+
+  defp process_group_key(%GroupKey{creator_id: creator_id, key_number: key_number} = group_key, private_key, token) do
+    with {:ok, {_, signature_key}} <- Cache.get_public_keys(creator_id, token),
+         {:ok, _key} <- Crypto.verify_group_key(group_key, signature_key),
+         {:ok, decrypted_key} <- Crypto.extract_and_decrypt_group_key(group_key, private_key) do
+      {:ok, decrypted_key}
+    else
+      {:error, :not_found} ->
+        Logger.warning("Could not fetch public key of key number #{key_number} creator")
+        :error
+      {:error, :invalid_signature} ->
+        Logger.warning("Could not verify signature of group key number #{key_number}")
+        :error
+      {:error, _reason} ->
+        Logger.warning("Failed to decrypt group key number #{key_number}")
+        :error
+    end
   end
 
   defp fetch_latest_group_key(%{assigns: %{token: token, selected_chat: id, encryption_private_key: encoded_private_key,
