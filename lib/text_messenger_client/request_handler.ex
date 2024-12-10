@@ -9,7 +9,7 @@ defmodule TextMessengerClient.RequestHandler do
 
     headers = if token, do: [{"Authorization", "Bearer #{token}"} | headers], else: headers
 
-    Logger.debug("Sending GET request #{endpoint}}")
+    Logger.info("Sending GET request #{endpoint}")
 
     case HTTPoison.get(endpoint, headers) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
@@ -43,7 +43,7 @@ defmodule TextMessengerClient.RequestHandler do
 
     headers = if token, do: [{"Authorization", "Bearer #{token}"} | headers], else: headers
 
-    Logger.debug("Sending POST request #{endpoint}}")
+    Logger.info("Sending POST request #{endpoint}")
 
     case HTTPoison.post(endpoint, payload, headers) do
       {:ok, %HTTPoison.Response{status_code: status_code, body: body, headers: response_headers}} ->

@@ -62,10 +62,8 @@ config :phoenix, :json_library, Jason
 
 # Application specific configuration variables
 config :text_messenger_client,
-  api_url: "http://127.0.0.1:4001/api",
-  socket_url: "ws://127.0.0.1:4001/socket/websocket",
-  priv_key_path: "private_key.pem",
-  cert_key_path: "cert_key.pem"
+  api_url: System.get_env("API_URL") || "http://127.0.0.1:4001/api",
+  socket_url: System.get_env("SOCKET_URL") || "ws://127.0.0.1:4001/socket/websocket"
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

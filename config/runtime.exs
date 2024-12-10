@@ -33,7 +33,7 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  host = System.get_env("PHX_HOST") || "127.0.0.1"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   config :text_messenger_client, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
@@ -49,6 +49,12 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+	
+  config :text_messenger_client,
+    api_url: System.fetch_env!("API_URL"),
+    socket_url: System.fetch_env!("SOCKET_URL"),
+    priv_key_path: System.get_env("PRIV_KEY_PATH", "private_key.pem"),
+    cert_key_path: System.get_env("CERT_KEY_PATH", "cert_key.pem")
 
   # ## SSL Support
   #

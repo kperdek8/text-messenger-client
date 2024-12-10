@@ -118,7 +118,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "new_message", payload: %{"message_id" => id, "content" => encoded_content, "user_id" => user_id, "iv" => encoded_iv, "tag" => encoded_tag}}, socket) do
-    Logger.debug("Received `new_message` message from server")
+    Logger.info("Received `new_message` message from server. Decrypting with key number: #{socket.assigns.latest_group_key_number}")
     {:ok, tag} = Base.decode64(encoded_tag)
     {:ok, iv} = Base.decode64(encoded_iv)
     {:ok, content} = Base.decode64(encoded_content)
@@ -128,13 +128,13 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "change_key_request", payload: %{"chat_id" => chat_id}}, socket) do
-    Logger.debug("Received `change_key_request` message from server")
+    Logger.info("Received `change_key_request` message from server")
     send_new_group_key(socket, chat_id)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "group_key_changed", payload: _payload}, socket) do
-    Logger.debug("Received `group_key_changed` message from server")
+    Logger.info("Received `group_key_changed` message from server")
     case fetch_latest_group_key(socket) do
       {:ok, socket} -> {:noreply, socket}
       {:redirect, socket} -> {:noreply, socket}
@@ -145,7 +145,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "add_user", payload: %{"user_id" => user_id}}, socket) do
-    Logger.debug("Received `add_user` message from server")
+    Logger.info("Received `add_user` message from server")
       case add_user(socket, user_id) do
         {:ok, socket} -> {:noreply, socket}
         {:redirect, socket} -> {:noreply, socket}
@@ -153,13 +153,13 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "kick_user", payload: %{"user_id" => user_id}}, socket) do
-    Logger.debug("Received `kick_user` message from server")
+    Logger.info("Received `kick_user` message from server")
     {:ok, socket} = remove_user(socket, user_id)
     {:noreply, socket}
   end
 
   def handle_info(%PhoenixClient.Message{event: "added_to_chat", payload: %{"chat_id" => chat_id}}, socket) do
-    Logger.debug("Received `added_to_chat` message from server")
+    Logger.info("Received `added_to_chat` message from server")
     case fetch_chat(socket, chat_id) do
       {:ok, socket} -> {:noreply, socket}
       {:redirect, socket} -> {:noreply, socket}
@@ -167,7 +167,7 @@ defmodule TextMessengerClientWeb.HomePage do
   end
 
   def handle_info(%PhoenixClient.Message{event: "removed_from_chat", payload: %{"chat_id" => chat_id}}, socket) do
-    Logger.debug("Received `removed_from_chat` message from server")
+    Logger.info("Received `removed_from_chat` message from server")
     {:ok, socket} = remove_chat(socket, chat_id)
     if socket.assigns.selected_chat == chat_id do
       with {:ok, socket} <- open_first_chat(socket),
@@ -540,6 +540,7 @@ defmodule TextMessengerClientWeb.HomePage do
         %GroupKey{key_number: key_number} = key ->
           case process_group_key(key, private_key, token) do
             {:ok, decrypted_key} ->
+			  Logger.info("Latest group key number: #{key_number}")
               {decrypted_key, key_number}
 
             _ ->
